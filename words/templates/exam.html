@@ -391,6 +391,7 @@ async function submitExam() {
   try {
     const res = await VOCAB_API.post('/api/exam/submit/', { answers, duration });
     if (!res.success) { showToast(res.error || '交卷失败', 'error'); return; }
+    if (res.auto_checked) showToast('今日已背诵 30 词，自动打卡成功！', 'success');
     examState.phase = 'result';
     examState.result = res;
     saveExamState();

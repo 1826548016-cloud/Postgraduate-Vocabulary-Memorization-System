@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (Unit, Word, StudyProgress, StudyPlan,
-                     DailyCheckIn, Favorite, Note, StudySession, UserSettings)
+                     DailyCheckIn, Favorite, Note, StudySession, UserSettings, AIModel)
 
 
 @admin.register(Unit)
@@ -54,3 +54,11 @@ class StudySessionAdmin(admin.ModelAdmin):
 class UserSettingsAdmin(admin.ModelAdmin):
     list_display = ['font_size', 'dark_mode', 'pronunciation_on',
                     'speech_rate', 'daily_new_target']
+
+
+@admin.register(AIModel)
+class AIModelAdmin(admin.ModelAdmin):
+    list_display = ['display_name', 'model_id', 'provider', 'vision',
+                    'enabled', 'updated_at']
+    list_filter = ['provider', 'enabled', 'vision']
+    search_fields = ['model_id', 'display_name']

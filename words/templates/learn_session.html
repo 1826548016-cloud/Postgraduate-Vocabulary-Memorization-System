@@ -6,6 +6,15 @@
 
 {% block content %}
 {% csrf_token %}
+<style>
+  /* 展开笔记/速记时卡片放大 */
+  .word-card-expanded { max-width: 780px; }
+  .word-ext-panel {
+    margin-top: 22px; padding-top: 16px;
+    border-top: 1px dashed var(--c-border);
+    text-align: left;
+  }
+</style>
 
 <div class="card mb-4">
   <div class="flex justify-between items-center gap-4 mb-4">
@@ -25,7 +34,11 @@
 
 <div id="wordCard" class="card word-card">
   <div id="wordText" class="word-text">加载中…</div>
-  <button id="speakBtn" class="btn btn-secondary btn-sm" title="发音" style="margin-bottom: 12px;">🔊 发音</button>
+  <div class="flex gap-2 items-center" style="margin-bottom: 12px;">
+    <button id="speakBtn" class="btn btn-secondary btn-sm" title="发音">🔊 发音</button>
+    <button id="noteBtn" class="btn btn-secondary btn-sm" title="记笔记 / 查看笔记"><i class="ph ph-note-pencil"></i> 笔记</button>
+    <button id="quickMemoryBtn" class="btn btn-secondary btn-sm" title="AI 速记 / 查看速记"><i class="ph ph-lightning"></i> 速记</button>
+  </div>
   <div id="wordPhonetic" class="word-phonetic">—</div>
   <div id="wordPos" class="word-pos">—</div>
   <div id="wordMeaning" class="word-meaning hidden">—</div>
@@ -43,6 +56,42 @@
   <div class="flex justify-center gap-4 mt-6">
     <button id="prevBtn" class="btn btn-secondary">上一词 <span class="text-sm">(←)</span></button>
     <button id="nextBtn" class="btn btn-secondary">下一词 <span class="text-sm">(→)</span></button>
+  </div>
+
+  <!-- 笔记 / 速记 展开区（不弹窗，直接显示在卡片下方，卡片自动放大） -->
+  <div id="wordExtPanel" class="word-ext-panel hidden">
+    <!-- 笔记面板 -->
+    <div id="notePanel" class="hidden">
+      <div class="flex justify-between items-center" style="margin-bottom: 8px;">
+        <div style="font-weight: 600; font-size: var(--fs-sm);"><i class="ph ph-note-pencil" style="color: var(--c-green);"></i> 笔记 <span id="noteWordTitle" class="text-secondary" style="font-weight: normal; font-size: var(--fs-xs);"></span></div>
+        <button class="btn btn-ghost btn-sm" onclick="closeExtPanel()">收起 <i class="ph ph-x"></i></button>
+      </div>
+      <div id="noteMeta" class="text-sm text-secondary" style="margin-bottom: 6px;">加载中…</div>
+      <textarea id="noteContent" class="form-input" rows="4" style="resize: vertical;" placeholder="记录这个单词的记忆方法、例句、易错点…"></textarea>
+      <div class="flex gap-2" style="margin-top: 8px; align-items: center;">
+        <input id="notePage" class="form-input" type="number" placeholder="页码（可选）" style="width: 130px;">
+        <button id="noteDeleteBtn" class="btn btn-danger btn-sm hidden" onclick="deleteNote()"><i class="ph ph-trash"></i> 删除</button>
+        <span style="flex: 1;"></span>
+        <button class="btn btn-primary btn-sm" onclick="saveNote()"><i class="ph ph-check"></i> 保存笔记</button>
+      </div>
+    </div>
+
+    <!-- 速记面板 -->
+    <div id="qmPanel" class="hidden">
+      <div class="flex justify-between items-center" style="margin-bottom: 8px;">
+        <div style="font-weight: 600; font-size: var(--fs-sm);"><i class="ph ph-lightning" style="color: var(--c-amber);"></i> 速记 <span id="qmWordTitle" class="text-secondary" style="font-weight: normal; font-size: var(--fs-xs);"></span></div>
+        <button class="btn btn-ghost btn-sm" onclick="closeExtPanel()">收起 <i class="ph ph-x"></i></button>
+      </div>
+      <div id="qmMeta" class="text-sm text-secondary" style="margin-bottom: 6px;">加载中…</div>
+      <textarea id="qmContent" class="form-input" rows="10" style="resize: vertical; font-family: monospace; line-height: 1.7;" placeholder="点击「生成速记」让 AI 为你创作，或直接手动输入。"></textarea>
+      <div class="flex gap-2" style="margin-top: 8px; align-items: center; flex-wrap: wrap;">
+        <button id="qmGenerateBtn" class="btn btn-primary btn-sm hidden" onclick="generateQuickMemory(false)"><i class="ph ph-magic-wand"></i> 生成速记</button>
+        <button id="qmRegenBtn" class="btn btn-secondary btn-sm hidden" onclick="generateQuickMemory(true)" title="重新调用 AI 生成（会覆盖当前内容）"><i class="ph ph-arrows-clockwise"></i> 重新生成</button>
+        <button id="qmDeleteBtn" class="btn btn-danger btn-sm hidden" onclick="deleteQuickMemory()"><i class="ph ph-trash"></i> 删除</button>
+        <span style="flex: 1;"></span>
+        <button class="btn btn-primary btn-sm" onclick="saveQuickMemory()"><i class="ph ph-check"></i> 保存</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -166,6 +215,9 @@
       return;
     }
 
+    // 切换单词时收起笔记/速记展开区
+    closeExtPanel();
+
     currentWord = wordsData[currentIndex];
     revealed = false;
 
@@ -200,8 +252,13 @@
     sessionStorage.setItem('vocab-learn-counts', JSON.stringify(counts));
 
     VOCAB_API.post('/api/mark/' + action + '/' + currentWord.id + '/', {})
-      .then(function () { advance(); })
-      .catch(function () { showToast('标记失败', 'error'); });
+      .then(function (res) {
+        if (res && res.auto_checked) showToast('今日已背诵 30 词，自动打卡成功！', 'success');
+        advance();
+      })
+      .catch(function (err) {
+        if (typeof showToast === 'function') showToast('标记失败', 'error');
+      });
   }
 
   function advance() {
@@ -234,9 +291,247 @@
     sessionStorage.removeItem('vocab-learn-counts');
   }
 
+  // ===== 笔记：记笔记 / 查看之前的笔记（保存到数据库） =====
+  var noteWordId = null;
+
+  function loadNoteForPanel() {
+    noteWordId = currentWord.id;
+    document.getElementById('noteWordTitle').textContent = '· ' + (currentWord.word || '');
+    document.getElementById('noteMeta').textContent = '加载中…';
+    document.getElementById('noteContent').value = '';
+    document.getElementById('notePage').value = '';
+    document.getElementById('noteDeleteBtn').classList.add('hidden');
+
+    // 读取数据库中的历史笔记
+    VOCAB_API.get('/api/note/' + noteWordId + '/')
+      .then(function (res) {
+        if (res && res.success) {
+          document.getElementById('noteContent').value = res.content || '';
+          document.getElementById('notePage').value = res.page_number || '';
+          var meta = res.content ? '查看之前的笔记' : '暂无笔记，记录你的记忆方法吧';
+          if (res.updated_at) meta += ' · 更新于 ' + res.updated_at;
+          document.getElementById('noteMeta').textContent = meta;
+          if (res.content) document.getElementById('noteDeleteBtn').classList.remove('hidden');
+        }
+      })
+      .catch(function () {
+        document.getElementById('noteMeta').textContent = '加载笔记失败';
+      });
+  }
+
+  // ===== 展开区：在单词卡下方直接展示（不弹窗），卡片自动放大 =====
+  function openExtPanel(type) {
+    if (!currentWord) return;
+    document.getElementById('wordCard').classList.add('word-card-expanded');
+    document.getElementById('wordExtPanel').classList.remove('hidden');
+    if (type === 'note') {
+      document.getElementById('notePanel').classList.remove('hidden');
+      document.getElementById('qmPanel').classList.add('hidden');
+      loadNoteForPanel();
+    } else {
+      document.getElementById('qmPanel').classList.remove('hidden');
+      document.getElementById('notePanel').classList.add('hidden');
+      loadQuickMemoryForPanel();
+    }
+    document.getElementById('wordExtPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function closeExtPanel() {
+    document.getElementById('wordCard').classList.remove('word-card-expanded');
+    document.getElementById('wordExtPanel').classList.add('hidden');
+    document.getElementById('notePanel').classList.add('hidden');
+    document.getElementById('qmPanel').classList.add('hidden');
+  }
+
+  function saveNote() {
+    if (!noteWordId) return;
+    var content = document.getElementById('noteContent').value;
+    var pageNumber = document.getElementById('notePage').value;
+    VOCAB_API.post('/api/note/' + noteWordId + '/', {
+      content: content,
+      page_number: pageNumber === '' ? null : (parseInt(pageNumber, 10) || null),
+    })
+      .then(function (res) {
+        if (res && res.success) {
+          showToast('笔记已保存', 'success');
+          document.getElementById('noteDeleteBtn').classList.remove('hidden');
+          closeExtPanel();
+        } else {
+          showToast((res && res.error) || '保存失败', 'error');
+        }
+      })
+      .catch(function (e) {
+        showToast((e && e.error) || '保存失败', 'error');
+      });
+  }
+
+  function deleteNote() {
+    if (!noteWordId) return;
+    if (!confirm('确定删除这条笔记吗？')) return;
+    VOCAB_API.del('/api/note/' + noteWordId + '/')
+      .then(function (res) {
+        if (res && res.success) {
+          showToast('笔记已删除', 'success');
+          document.getElementById('noteDeleteBtn').classList.add('hidden');
+          document.getElementById('noteContent').value = '';
+          document.getElementById('notePage').value = '';
+          document.getElementById('noteMeta').textContent = '暂无笔记，记录你的记忆方法吧';
+        }
+      })
+      .catch(function () {
+        showToast('删除失败', 'error');
+      });
+  }
+
+  // 暴露给内联 onclick
+  window.openExtPanel = openExtPanel;
+  window.closeExtPanel = closeExtPanel;
+  window.saveNote = saveNote;
+  window.deleteNote = deleteNote;
+
+  // ===== 速记：AI 生成并缓存到数据库，下次直接读取不再调用 AI =====
+  var qmWordId = null;
+  // 模型配置已统一由「设置 → AI 模型」管理（数据库），生成时后端自动读取启用模型
+  var AI_SETTINGS_URL = "{% url 'words:settings_page' %}#ai-models";
+
+  // 检查是否已配置可用的 AI 模型
+  function checkAIModelConfigured() {
+    return VOCAB_API.get('/api/ai-models/').then(function (res) {
+      var models = (res && res.models) || [];
+      return models.some(function (m) { return m.enabled; });
+    }).catch(function () { return false; });
+  }
+
+  function loadQuickMemoryForPanel() {
+    qmWordId = currentWord.id;
+    document.getElementById('qmWordTitle').textContent = '· ' + (currentWord.word || '');
+    document.getElementById('qmMeta').textContent = '加载中…';
+    document.getElementById('qmContent').value = '';
+    document.getElementById('qmGenerateBtn').classList.add('hidden');
+    document.getElementById('qmRegenBtn').classList.add('hidden');
+    document.getElementById('qmDeleteBtn').classList.add('hidden');
+
+    // 先从数据库读取：有则直接显示，无则提示生成
+    VOCAB_API.get('/api/word/' + qmWordId + '/quick-memory/')
+      .then(function (res) {
+        if (res && res.success && res.content) {
+          document.getElementById('qmContent').value = res.content;
+          var meta = '已保存的速记（来自数据库，无需重新调用 AI）';
+          if (res.updated_at) meta += ' · 更新于 ' + res.updated_at;
+          document.getElementById('qmMeta').textContent = meta;
+          document.getElementById('qmRegenBtn').classList.remove('hidden');
+          document.getElementById('qmDeleteBtn').classList.remove('hidden');
+        } else {
+          // 无速记：已配置 AI 模型则显示「生成速记」，否则引导去设置页
+          checkAIModelConfigured().then(function (ok) {
+            if (ok) {
+              document.getElementById('qmContent').value = '';
+              document.getElementById('qmMeta').textContent = '还没有速记，点击「生成速记」让 AI 为你创作（结果保存到数据库，下次直接查看）';
+              document.getElementById('qmGenerateBtn').classList.remove('hidden');
+            } else {
+              document.getElementById('qmMeta').innerHTML = '尚未配置 AI 模型，请先到 <a href="' + AI_SETTINGS_URL + '" style="color: var(--c-green);">设置 → AI 模型</a> 中添加并启用一个模型';
+            }
+          });
+        }
+      })
+      .catch(function () {
+        document.getElementById('qmMeta').textContent = '加载速记失败';
+        document.getElementById('qmGenerateBtn').classList.remove('hidden');
+      });
+  }
+
+  function saveQuickMemory() {
+    if (!qmWordId) return;
+    var content = document.getElementById('qmContent').value;
+    VOCAB_API.post('/api/word/' + qmWordId + '/quick-memory/', { content: content })
+      .then(function (res) {
+        if (res && res.success) {
+          showToast('速记已保存', 'success');
+          document.getElementById('qmMeta').textContent = '已保存的速记（来自数据库，无需重新调用 AI）';
+          document.getElementById('qmRegenBtn').classList.remove('hidden');
+          document.getElementById('qmDeleteBtn').classList.remove('hidden');
+          document.getElementById('qmGenerateBtn').classList.add('hidden');
+          closeExtPanel();
+        } else {
+          showToast((res && res.error) || '保存失败', 'error');
+        }
+      })
+      .catch(function (e) {
+        showToast((e && e.error) || '保存失败', 'error');
+      });
+  }
+
+  function deleteQuickMemory() {
+    if (!qmWordId) return;
+    if (!confirm('确定删除这条速记吗？')) return;
+    VOCAB_API.del('/api/word/' + qmWordId + '/quick-memory/')
+      .then(function (res) {
+        if (res && res.success) {
+          showToast('速记已删除', 'success');
+          document.getElementById('qmContent').value = '';
+          document.getElementById('qmMeta').textContent = '还没有速记，点击「生成速记」让 AI 为你创作';
+          document.getElementById('qmGenerateBtn').classList.remove('hidden');
+          document.getElementById('qmRegenBtn').classList.add('hidden');
+          document.getElementById('qmDeleteBtn').classList.add('hidden');
+        }
+      })
+      .catch(function () {
+        showToast('删除失败', 'error');
+      });
+  }
+
+  function generateQuickMemory(force) {
+    if (!qmWordId) return;
+    var btn = document.getElementById('qmGenerateBtn');
+    btn.disabled = true;
+    var oldHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i> AI 生成中…';
+    document.getElementById('qmMeta').textContent = 'AI 正在创作速记，请稍候…';
+
+    // 模型配置由设置页统一管理（数据库），后端自动读取启用模型；未配置时后端返回提示
+    VOCAB_API.post('/api/word/' + qmWordId + '/quick-memory/generate/', {
+      force: !!force,
+    })
+      .then(function (res) {
+        if (res && res.success) {
+          document.getElementById('qmContent').value = res.content || '';
+          document.getElementById('qmMeta').textContent = res.cached
+            ? '已使用数据库中的速记（无需重新调用 AI）'
+            : 'AI 生成完成，已保存到数据库（下次直接查看，不再调用 AI）';
+          document.getElementById('qmRegenBtn').classList.remove('hidden');
+          document.getElementById('qmDeleteBtn').classList.remove('hidden');
+          document.getElementById('qmGenerateBtn').classList.add('hidden');
+        } else {
+          var err = (res && res.error) || '生成失败';
+          if (err.indexOf('尚未配置 AI 模型') !== -1) {
+            document.getElementById('qmMeta').innerHTML = '尚未配置 AI 模型，请先到 <a href="' + AI_SETTINGS_URL + '" style="color: var(--c-green);">设置 → AI 模型</a> 中添加并启用一个模型';
+          } else {
+            document.getElementById('qmMeta').textContent = err;
+          }
+          showToast(err, 'error');
+        }
+      })
+      .catch(function (e) {
+        var err = (e && e.error) || '生成失败，请检查模型配置';
+        document.getElementById('qmMeta').textContent = err;
+        showToast(err, 'error');
+      })
+      .then(function () {
+        btn.disabled = false;
+        btn.innerHTML = oldHtml;
+      });
+  }
+
+  // 暴露给内联 onclick
+  window.saveQuickMemory = saveQuickMemory;
+  window.deleteQuickMemory = deleteQuickMemory;
+  window.generateQuickMemory = generateQuickMemory;
+
   // Button bindings
   els.revealBtn.addEventListener('click', reveal);
   document.getElementById('speakBtn').addEventListener('click', replayAudio);
+  document.getElementById('noteBtn').addEventListener('click', function () { openExtPanel('note'); });
+  document.getElementById('quickMemoryBtn').addEventListener('click', function () { openExtPanel('qm'); });
   document.getElementById('prevBtn').addEventListener('click', goPrev);
   document.getElementById('nextBtn').addEventListener('click', goNext);
 
@@ -246,6 +541,11 @@
 
   // Keyboard
   document.addEventListener('keydown', function(e) {
+    // 笔记/速记展开区打开时：仅响应 ESC 收起，其余按键不触发背诵操作
+    if (!document.getElementById('wordExtPanel').classList.contains('hidden')) {
+      if (e.key === 'Escape') closeExtPanel();
+      return;
+    }
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     switch (e.code) {
       case 'Space': e.preventDefault(); reveal(); break;

@@ -235,6 +235,7 @@ async function toggleMastery() {
     });
     const data = await response.json();
     if (data.success) {
+      if (data.auto_checked) showToast('今日已背诵 30 词，自动打卡成功！', 'success');
       const btn = document.getElementById('masteryToggleBtn');
       if (data.is_mastered) {
         btn.className = 'btn btn-primary btn-lg';

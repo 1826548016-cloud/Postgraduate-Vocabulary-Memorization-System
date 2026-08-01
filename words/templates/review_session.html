@@ -315,7 +315,10 @@
     sessionStorage.setItem('vocab-review-counts', JSON.stringify(counts));
 
     VOCAB_API.post('/api/mark/' + action + '/' + currentWord.id + '/', {})
-      .then(function () { advance(); })
+      .then(function (res) {
+        if (res && res.auto_checked) showToast('今日已背诵 30 词，自动打卡成功！', 'success');
+        advance();
+      })
       .catch(function (err) {
         if (typeof showToast === 'function') showToast('标记失败', 'error');
       });

@@ -17,12 +17,12 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from .models import (Unit, Word, StudyProgress, StudyPlan,
-                     DailyCheckIn, Favorite, Note, StudySession, UserSettings)
+                     DailyCheckIn, Favorite, Note, QuickMemory, AIModel, StudySession, UserSettings)
 
 # ─── 帮助函数 ───────────────────────────────────────────────
 
 def update_daily_checkin():
-    """更新今日打卡统计数据"""
+    """更新今日打卡统计数据；今日背诵满 30 词自动打卡，返回是否刚刚自动打卡"""
     today = timezone.localdate()
     checkin, _ = DailyCheckIn.objects.get_or_create(date=today)
     checkin.new_words_learned = StudyProgress.objects.filter(
@@ -34,7 +34,12 @@ def update_daily_checkin():
         checkin.correct_rate = round(checkin.today_correct / total * 100, 1)
     else:
         checkin.correct_rate = 0
+    auto_checked = False
+    if not checkin.is_checked and (checkin.new_words_learned + checkin.words_reviewed) >= 30:
+        checkin.is_checked = True
+        auto_checked = True
     checkin.save()
+    return auto_checked
 
 def get_next_review(mastery_level):
     """艾宾浩斯复习间隔"""
@@ -236,7 +241,8 @@ def plan_create(request):
 
 def settings_page(request):
     settings_obj = UserSettings.get_settings()
-    return render(request, 'settings.html', {'settings': settings_obj})
+    ai_models = AIModel.objects.all().order_by('-enabled', 'id')
+    return render(request, 'settings.html', {'settings': settings_obj, 'ai_models': ai_models})
 
 
 def favorites_list(request):
@@ -391,13 +397,14 @@ def api_mark_word(request, action, word_id):
             checkin.today_wrong += 1
         checkin.save()
 
-        update_daily_checkin()
+        auto_checked = update_daily_checkin()
 
         return JsonResponse({
             'success': True,
             'status': progress.status,
             'mastery_level': progress.mastery_level,
             'next_review': progress.next_review.isoformat() if progress.next_review else None,
+            'auto_checked': auto_checked,
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
@@ -421,11 +428,12 @@ def api_toggle_mastery(request, word_id):
             progress.save()
             checkin.today_wrong += 1
             checkin.save()
-            update_daily_checkin()
+            auto_checked = update_daily_checkin()
             return JsonResponse({
                 'success': True,
                 'is_mastered': False,
                 'status_label': '不会',
+                'auto_checked': auto_checked,
             })
         else:
             # → 会
@@ -439,11 +447,12 @@ def api_toggle_mastery(request, word_id):
             progress.save()
             checkin.today_correct += 1
             checkin.save()
-            update_daily_checkin()
+            auto_checked = update_daily_checkin()
             return JsonResponse({
                 'success': True,
                 'is_mastered': True,
                 'status_label': '会',
+                'auto_checked': auto_checked,
             })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
@@ -941,9 +950,17 @@ def api_settings(request):
 
 
 @csrf_exempt
-@require_http_methods(['POST', 'DELETE'])
+@require_http_methods(['GET', 'POST', 'DELETE'])
 def api_note(request, word_id):
     word = get_object_or_404(Word, id=word_id)
+    if request.method == 'GET':
+        note = Note.objects.filter(word=word).first()
+        return JsonResponse({
+            'success': True,
+            'content': note.content if note else '',
+            'page_number': note.page_number if note else None,
+            'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M') if note and note.updated_at else None,
+        })
     if request.method == 'DELETE':
         Note.objects.filter(word=word).delete()
         return JsonResponse({'success': True, 'deleted': True})
@@ -958,6 +975,111 @@ def api_note(request, word_id):
         return JsonResponse({'success': True, 'note_id': note.id})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST', 'DELETE'])
+def api_quick_memory(request, word_id):
+    """速记：增删改查（GET 查询 / POST 保存编辑 / DELETE 删除），内容存数据库"""
+    word = get_object_or_404(Word, id=word_id)
+    if request.method == 'GET':
+        qm = QuickMemory.objects.filter(word=word).first()
+        return JsonResponse({
+            'success': True,
+            'content': qm.content if qm else '',
+            'updated_at': qm.updated_at.strftime('%Y-%m-%d %H:%M') if qm and qm.updated_at else None,
+        })
+    if request.method == 'DELETE':
+        QuickMemory.objects.filter(word=word).delete()
+        return JsonResponse({'success': True, 'deleted': True})
+    try:
+        data = json.loads(request.body)
+        qm, _ = QuickMemory.objects.get_or_create(word=word)
+        qm.content = data.get('content', '')
+        qm.save()
+        return JsonResponse({'success': True, 'quick_memory_id': qm.id})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_quick_memory_generate(request, word_id):
+    """AI 生成速记：数据库已有缓存则直接返回（不再调用 AI）；force=true 时强制重新生成"""
+    word = get_object_or_404(Word, id=word_id)
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        data = {}
+
+    existing = QuickMemory.objects.filter(word=word).first()
+    if existing and existing.content and not data.get('force'):
+        return JsonResponse({'success': True, 'content': existing.content, 'cached': True})
+
+    try:
+        cfg = resolve_ai_model(data)
+    except ValueError as e:
+        return JsonResponse({'error': str(e)}, status=400)
+    api_key = cfg['api_key']
+    base_url = cfg['base_url']
+    endpoint = cfg['endpoint']
+    model = cfg['model_id']
+
+    word_text = word.word
+    pos = word.pos or ''
+    meanings = '；'.join(word.get_meanings()[:3]) or ''
+    phonetic_us = word.phonetic_us or ''
+    phonetic_uk = word.phonetic_uk or ''
+
+    prompt = (
+        f'你是一名英语词汇记忆专家，擅长用拆分、谐音、联想口诀帮考研学生速记单词。\n'
+        f'请为单词 "{word_text}" 创作一份速记内容，格式严格如下（不要输出任何多余文字）：\n\n'
+        f'{word_text} 速记\n'
+        f'英 /{phonetic_uk}/ 美 /{phonetic_us}/\n'
+        f'{pos} {meanings}\n'
+        f'拆分秒背（最好用）\n'
+        f'拆成N段：seg1 + seg2 + ...\n'
+        f'谐音：中文谐音\n'
+        f'联想口诀：用各部分谐音/含义串成一句生动小故事\n\n'
+        f'要求：\n'
+        f'- 按音节自然拆分（如 environment → en + vi + ron + ment），N 用实际段数替换\n'
+        f'- 谐音要贴近英文发音\n'
+        f'- 口诀把每段的中文谐音或含义串成一句话，控制在 2 句以内\n'
+        f'- 若单词很短（3 个字母以内）可不拆分，直接编口诀\n'
+        f'- 音标若已有则保留，未提供可省略对应行'
+    )
+
+    payload = {
+        'model': model,
+        'temperature': 0.4,
+        'max_tokens': 500,
+        'messages': [{'role': 'user', 'content': prompt}],
+    }
+
+    req = urllib.request.Request(
+        resolve_ai_endpoint(base_url, endpoint),
+        data=json.dumps(payload).encode('utf-8'),
+        headers=build_ai_headers(api_key),
+        method='POST',
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8', 'ignore')
+        return JsonResponse({'error': 'AI 接口错误 (HTTP %s): %s' % (e.code, body[:400])}, status=502)
+    except urllib.error.URLError as e:
+        return JsonResponse({'error': '无法连接 %s: %s' % (resolve_ai_endpoint(base_url, endpoint), e.reason)}, status=502)
+
+    content = (result.get('choices', [{}])[0].get('message', {}).get('content', '') or '').strip()
+    if not content:
+        return JsonResponse({'error': 'AI 未返回有效内容'}, status=502)
+
+    qm, _ = QuickMemory.objects.get_or_create(word=word)
+    qm.content = content
+    qm.save()
+    return JsonResponse({'success': True, 'content': content, 'cached': False})
 
 
 @csrf_exempt
@@ -1164,7 +1286,7 @@ def api_exam_submit(request):
                 })
 
         checkin.save()
-        update_daily_checkin()
+        auto_checked = update_daily_checkin()
 
         total = len(stored)
         StudySession.objects.create(
@@ -1187,6 +1309,7 @@ def api_exam_submit(request):
             'correct_rate': round(correct_count / total * 100, 1) if total else 0,
             'duration': duration,
             'results': results,
+            'auto_checked': auto_checked,
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
@@ -1557,6 +1680,111 @@ def build_ai_headers(api_key):
     return headers
 
 
+def serialize_ai_model(m):
+    """AIModel 数据库记录 → 前端 JSON"""
+    return {
+        'id': m.id,
+        'provider': m.provider,
+        'model_id': m.model_id,
+        'display_name': m.display_name,
+        'base_url': m.base_url,
+        'endpoint': m.endpoint,
+        'api_key': m.api_key,
+        'context': m.context,
+        'vision': m.vision,
+        'enabled': m.enabled,
+    }
+
+
+def resolve_ai_model(data):
+    """解析 AI 调用所需的模型配置（配置统一存数据库 AIModel 表，由设置页管理）。
+    优先级：前端指定 model_id（数据库模型）> 前端内联配置（旧版兼容）> 数据库第一个启用模型。
+    未找到时抛 ValueError，由调用方转为 400 响应。
+    """
+    model_id = data.get('model_id')
+    if model_id:
+        try:
+            m = AIModel.objects.get(id=int(model_id))
+        except (AIModel.DoesNotExist, ValueError, TypeError):
+            raise ValueError('指定的模型不存在，请到「设置 → AI 模型」中重新选择')
+        if not m.enabled:
+            raise ValueError('该模型已被禁用，请到「设置 → AI 模型」中启用')
+        return serialize_ai_model(m)
+    # 旧版兼容：前端直接传 api_key/base_url/endpoint/model
+    if data.get('model') or data.get('api_key') or data.get('base_url') or data.get('endpoint'):
+        cfg = {
+            'id': None,
+            'provider': 'custom',
+            'model_id': (data.get('model') or '').strip(),
+            'display_name': data.get('model') or '',
+            'base_url': (data.get('base_url') or 'https://api.openai.com/v1').strip(),
+            'endpoint': (data.get('endpoint') or '').strip(),
+            'api_key': (data.get('api_key') or '').strip(),
+            'context': '128K',
+            'vision': True,
+            'enabled': True,
+        }
+        if not cfg['model_id']:
+            raise ValueError('请填写模型 ID')
+        return cfg
+    m = AIModel.objects.filter(enabled=True).order_by('id').first()
+    if not m:
+        raise ValueError('尚未配置 AI 模型，请先到「设置 → AI 模型」中添加并启用一个模型')
+    return serialize_ai_model(m)
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST', 'DELETE'])
+def api_ai_models(request):
+    """AI 模型管理：GET 列表 / POST 新增或更新 / DELETE 删除（配置统一存数据库，设置页管理）"""
+    if request.method == 'GET':
+        models = AIModel.objects.all().order_by('-enabled', 'id')
+        return JsonResponse({'models': [serialize_ai_model(m) for m in models]})
+
+    if request.method == 'DELETE':
+        try:
+            body = json.loads(request.body)
+        except Exception:
+            body = {}
+        mid = body.get('id') or request.GET.get('id')
+        if mid:
+            try:
+                AIModel.objects.filter(id=int(mid)).delete()
+            except (ValueError, TypeError):
+                pass
+        return JsonResponse({'success': True, 'deleted': mid})
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+
+    mid = data.get('id')
+    if mid:
+        try:
+            m = AIModel.objects.get(id=int(mid))
+        except (AIModel.DoesNotExist, ValueError, TypeError):
+            return JsonResponse({'error': '模型不存在'}, status=404)
+    else:
+        m = AIModel()
+
+    m.provider = (data.get('provider') or 'custom').strip() or 'custom'
+    m.model_id = (data.get('model_id') or '').strip()
+    m.display_name = (data.get('display_name') or '').strip()
+    m.base_url = (data.get('base_url') or 'https://api.openai.com/v1').strip()
+    m.endpoint = (data.get('endpoint') or '').strip()
+    m.api_key = (data.get('api_key') or '').strip()
+    m.context = (data.get('context') or '128K').strip() or '128K'
+    if 'vision' in data:
+        m.vision = bool(data.get('vision'))
+    if 'enabled' in data:
+        m.enabled = bool(data.get('enabled'))
+    if not m.model_id:
+        return JsonResponse({'error': '请填写模型 ID'}, status=400)
+    m.save()
+    return JsonResponse({'success': True, 'model': serialize_ai_model(m)})
+
+
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_ai_recognize(request):
@@ -1569,13 +1797,15 @@ def api_ai_recognize(request):
         text_content = data.get('text_content', '')
         file_content = data.get('file_content', '')
         file_name = data.get('file_name', '')
-        api_key = data.get('api_key', '')
-        base_url = data.get('base_url', 'https://api.openai.com/v1')
-        endpoint = data.get('endpoint', '')
-        model = data.get('model', 'gpt-4o-mini')
 
-        if not model:
-            return JsonResponse({'error': '请填写模型 ID'}, status=400)
+        try:
+            cfg = resolve_ai_model(data)
+        except ValueError as e:
+            return JsonResponse({'error': str(e)}, status=400)
+        api_key = cfg['api_key']
+        base_url = cfg['base_url']
+        endpoint = cfg['endpoint']
+        model = cfg['model_id']
 
         json_schema = (
             '[{"word": "单词拼写", "phonetic_us": "美式音标如/ˈdʒenəreɪt/", '
@@ -1680,15 +1910,18 @@ def api_ai_review(request):
     try:
         data = json.loads(request.body)
         words = data.get('words', [])
-        api_key = data.get('api_key', '')
-        base_url = data.get('base_url', 'https://api.openai.com/v1')
-        endpoint = data.get('endpoint', '')
-        model = data.get('model', 'gpt-4o-mini')
+
+        try:
+            cfg = resolve_ai_model(data)
+        except ValueError as e:
+            return JsonResponse({'error': str(e)}, status=400)
+        api_key = cfg['api_key']
+        base_url = cfg['base_url']
+        endpoint = cfg['endpoint']
+        model = cfg['model_id']
 
         if not words:
             return JsonResponse({'error': '没有可复审的单词'}, status=400)
-        if not model:
-            return JsonResponse({'error': '请填写模型 ID'}, status=400)
 
         words_json = json.dumps(words, ensure_ascii=False)
         prompt = (
@@ -1769,6 +2002,97 @@ def api_ai_review(request):
         return JsonResponse({'review': normalized, 'issues': issue_count, 'total': len(normalized)})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_ai_export_pdf(request):
+    """人工审核导出 PDF：将 AI 识别结果导出为可离线核对的 PDF 清单"""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+
+    pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    words = data.get('words') or []
+    if not words:
+        return JsonResponse({'error': '没有可导出的单词'}, status=400)
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            topMargin=20 * mm, bottomMargin=20 * mm,
+                            leftMargin=15 * mm, rightMargin=15 * mm)
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle('title', fontName='STSong-Light', fontSize=14,
+                                 leading=20, spaceAfter=4, alignment=1)
+    sub_style = ParagraphStyle('sub', fontName='STSong-Light', fontSize=9,
+                               leading=13, textColor=colors.grey, alignment=1)
+
+    elements = [Paragraph('人工审核清单', title_style),
+                Paragraph('共 %d 词 · 请离线核对打勾，完成后回到系统逐条确认' % len(words), sub_style),
+                Spacer(1, 6 * mm)]
+
+    table_data = [['序号', '单词', '音标', '词性', '释义', '状态']]
+    for i, w in enumerate(words, 1):
+        if not isinstance(w, dict):
+            continue
+        meanings_raw = w.get('meanings') or []
+        if not isinstance(meanings_raw, list):
+            meanings_raw = [meanings_raw]
+        meanings_str = '; '.join([str(m) for m in meanings_raw if str(m).strip()])
+        status = '待复核'
+        if w.get('humanChecked'):
+            status = '人工已核对'
+        elif w.get('aiIssue'):
+            status = 'AI 已修正'
+        elif w.get('aiChecked'):
+            status = 'AI 通过'
+        table_data.append([
+            str(i),
+            str(w.get('word') or ''),
+            str(w.get('phonetic_us') or w.get('phonetic_uk') or ''),
+            str(w.get('pos') or ''),
+            meanings_str,
+            status,
+        ])
+
+    col_widths = [12 * mm, 42 * mm, 40 * mm, 14 * mm, 63 * mm, 24 * mm]
+    t = Table(table_data, colWidths=col_widths, repeatRows=1)
+    t.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, 0), 'STSong-Light'),
+        ('FONTNAME', (0, 0), (0, -1), 'STSong-Light'),
+        ('FONTNAME', (1, 1), (1, -1), 'Helvetica'),
+        ('FONTNAME', (2, 1), (2, -1), 'Helvetica'),
+        ('FONTNAME', (3, 0), (3, -1), 'STSong-Light'),
+        ('FONTNAME', (4, 0), (4, -1), 'STSong-Light'),
+        ('FONTNAME', (5, 0), (5, -1), 'STSong-Light'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('FONTSIZE', (0, 0), (-1, 0), 9),
+        ('GRID', (0, 0), (-1, -1), 0.3, colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.9, 0.9, 0.9)),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.Color(0.95, 0.95, 0.95)]),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(t)
+
+    doc.build(elements)
+    buf.seek(0)
+    return FileResponse(buf, content_type='application/pdf',
+                        filename='人工审核_%s.pdf' % timezone.localdate().strftime('%Y%m%d'),
+                        as_attachment=True)
 
 
 @csrf_exempt

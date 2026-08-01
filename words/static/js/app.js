@@ -46,7 +46,19 @@ var VOCAB_API = {
     });
     return r.json();
   },
-  del: async function (url) {
+  del: async function (url, data) {
+    if (data) {
+      var csrf = document.querySelector('[name=csrfmiddlewaretoken]');
+      var r = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrf ? csrf.value : '',
+        },
+        body: JSON.stringify(data),
+      });
+      return r.json();
+    }
     var r = await fetch(url, { method: 'DELETE' });
     return r.json();
   },

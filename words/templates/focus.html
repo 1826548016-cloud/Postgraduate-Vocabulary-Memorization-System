@@ -328,7 +328,8 @@ async function focusMark(action) {
   var word = focusWords[focusIndex];
 
   try {
-    await VOCAB_API.post('/api/mark/' + action + '/' + word.id + '/');
+    var res = await VOCAB_API.post('/api/mark/' + action + '/' + word.id + '/');
+    if (res && res.auto_checked) showToast('今日已背诵 30 词，自动打卡成功！', 'success');
     sessionStats.total++;
     if (action === 'mastered') sessionStats.mastered++;
     else if (action === 'unknown') sessionStats.unknown++;

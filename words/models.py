@@ -222,6 +222,22 @@ class Note(models.Model):
         return f'{self.word.word} - 笔记'
 
 
+class QuickMemory(models.Model):
+    """速记：AI 生成的单词快速记忆内容，缓存到数据库，下次直接读取不再调用 AI"""
+    word = models.OneToOneField(Word, on_delete=models.CASCADE,
+        related_name='quick_memory', verbose_name='单词')
+    content = models.TextField(blank=True, verbose_name='速记内容')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        verbose_name = '速记'
+        verbose_name_plural = '速记'
+
+    def __str__(self):
+        return f'{self.word.word} - 速记'
+
+
 class StudySession(models.Model):
     MODE_CHOICES = [
         ('sequential', '顺序背诵'),
@@ -288,3 +304,25 @@ class UserSettings(models.Model):
         if not settings:
             settings = cls.objects.create()
         return settings
+
+
+class AIModel(models.Model):
+    """AI 模型配置：集中存储在数据库，由设置页统一管理"""
+    provider = models.CharField(max_length=50, default='openai', verbose_name='服务商')
+    model_id = models.CharField(max_length=100, verbose_name='模型 ID')
+    display_name = models.CharField(max_length=100, blank=True, verbose_name='展示名称')
+    base_url = models.CharField(max_length=300, default='https://api.openai.com/v1', verbose_name='接口基础地址')
+    endpoint = models.CharField(max_length=400, blank=True, verbose_name='完整请求地址')
+    api_key = models.CharField(max_length=300, blank=True, verbose_name='API 密钥')
+    context = models.CharField(max_length=10, blank=True, default='128K', verbose_name='上下文')
+    vision = models.BooleanField(default=True, verbose_name='支持图片识别')
+    enabled = models.BooleanField(default=True, verbose_name='启用')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        verbose_name = 'AI 模型'
+        verbose_name_plural = 'AI 模型'
+
+    def __str__(self):
+        return self.display_name or self.model_id
