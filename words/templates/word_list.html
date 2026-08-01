@@ -264,6 +264,7 @@
 <script>
   var wordDetailUrlTemplate = "{% url 'words:word_detail' 0 %}".replace('/0/', '/__ID__/');
   var favoriteUrlTemplate = "{% url 'words:api_favorite' 0 %}".replace('/0/', '/__ID__/');
+  var AI_IMPORT_URL = "{% url 'words:ai_import' %}";
   var perPage = 50;
   var currentPage = 1;
   var searchDebounceTimer = null;
@@ -683,7 +684,7 @@
             '<strong>' + escapeHtml(u.name) + '</strong>' +
             '<div class="flex items-center gap-1">' +
               '<span class="text-secondary text-sm">' + u.mastered_count + ' / ' + u.word_count + '</span>' +
-              '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); location.href=\'{% url 'words:ai_import' %}?unit=' + u.number + '\'" title="AI 导入到此单元" style="padding: 2px 4px; font-size: 0.7rem;"><i class="ph ph-sparkle"></i></button>' +
+              '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); location.href=AI_IMPORT_URL + \'?unit=\' + ' + u.number + '" title="AI 导入到此单元" style="padding: 2px 4px; font-size: 0.7rem;"><i class="ph ph-sparkle"></i></button>' +
               '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); showEditUnit(' + u.number + ', \'' + escapeHtml(u.name).replace(/'/g, "\\'") + '\', \'' + u.category + '\')" title="编辑单元" style="padding: 2px 4px; font-size: 0.7rem;">✎</button>' +
               '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); deleteUnit(' + u.number + ', \'' + escapeHtml(u.name).replace(/'/g, "\\'") + '\')" title="删除单元" style="padding: 2px 4px; font-size: 0.7rem;">✕</button>' +
             '</div>' +
