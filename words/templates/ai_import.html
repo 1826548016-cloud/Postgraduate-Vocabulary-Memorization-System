@@ -1,0 +1,1295 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}AI 单词导入 - 考研单词背诵系统{% endblock %}
+{% block page_title %}AI 单词导入{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<!-- 页面头部 -->
+<div class="flex justify-between items-center" style="margin-bottom: 16px; flex-wrap: wrap; gap: 8px;">
+  <div style="min-width: 0;">
+    <h3 style="margin: 0;"><i class="ph ph-sparkle" style="color: var(--c-green);"></i> AI 单词导入</h3>
+    <p class="text-sm text-secondary" style="margin: 4px 0 0;">支持 <strong>图片 / 纯文本 / 文件</strong> 三种方式识别单词。识别结果需依次通过 <strong>AI 复审、人工复审、随机抽审</strong> 三道校验，全部通过后才能导入，防止识别错误。</p>
+  </div>
+  <a class="btn btn-secondary btn-sm" href="{% url 'words:word_list' %}"><i class="ph ph-arrow-left"></i> 返回词库</a>
+</div>
+
+<!-- Step 1: 输入源 + 配置 -->
+<div class="card" id="aiConfigPane" style="margin-bottom: 16px;">
+  <div class="form-group">
+    <label class="form-label">输入方式</label>
+    <div class="ai-source-tabs">
+      <button type="button" class="ai-source-tab active" id="aiTabImage" onclick="switchAISource('image')"><i class="ph ph-image"></i> 图片</button>
+      <button type="button" class="ai-source-tab" id="aiTabText" onclick="switchAISource('text')"><i class="ph ph-text-align-left"></i> 纯文本</button>
+      <button type="button" class="ai-source-tab" id="aiTabFile" onclick="switchAISource('file')"><i class="ph ph-file-text"></i> 文件</button>
+    </div>
+    <div class="text-sm text-secondary" style="margin-top: 4px;">不擅长识别图片的模型，请使用「纯文本」或「文件」方式导入</div>
+  </div>
+
+  <!-- 图片输入 -->
+  <div id="aiSourceImage" class="ai-source-pane">
+    <label class="ai-upload-box" id="aiUploadBox">
+      <input type="file" id="aiFileInput" accept="image/*" style="display:none;" onchange="handleAIFile(this)">
+      <div id="aiUploadHint" class="text-center text-secondary" style="padding: 20px;">
+        <i class="ph ph-upload-simple" style="font-size: 28px;"></i><br>
+        点击上传图片（支持截图 / 拍照 / 词表图片）
+      </div>
+      <img id="aiPreview" src="" alt="预览" style="display:none; max-height: 200px; margin: 0 auto;">
+    </label>
+  </div>
+
+  <!-- 纯文本输入 -->
+  <div id="aiSourceText" class="ai-source-pane hidden">
+    <textarea id="aiTextInput" class="form-input" rows="6" style="resize: vertical; font-family: monospace;" placeholder="每行一个单词，可带音标/词性/释义，例如：&#10;abandon /əˈbændən/ v. 放弃；抛弃&#10;ability /əˈbɪləti/ n. 能力&#10;&#10;也可以直接粘贴整段英文/词汇表文本，AI 会自动整理成结构化词条"></textarea>
+  </div>
+
+  <!-- 文件输入 -->
+  <div id="aiSourceFile" class="ai-source-pane hidden">
+    <label class="ai-upload-box" id="aiFileUploadBox">
+      <input type="file" id="aiFileUpload" accept=".txt,.md,.csv" style="display:none;" onchange="handleAIFileUpload(this)">
+      <div id="aiFileUploadHint" class="text-center text-secondary" style="padding: 20px;">
+        <i class="ph ph-file-arrow-up" style="font-size: 28px;"></i><br>
+        点击上传文本文件（支持 .txt / .md / .csv）
+      </div>
+    </label>
+    <div id="aiFileInfo" class="hidden text-sm" style="margin-top: 6px;"></div>
+  </div>
+
+  <div class="form-group" style="margin-top: 14px;">
+    <label class="form-label">选择模型</label>
+    <div class="flex gap-2">
+      <select id="aiModelSelect" class="form-input" onchange="onAIModelSelectChange()"></select>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="openModelManager()" style="white-space: nowrap;"><i class="ph ph-sliders-horizontal"></i> 管理模型</button>
+    </div>
+    <div id="aiModelInfo" class="ai-test-result" style="color: var(--c-text-3);"></div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="form-group">
+      <label class="form-label">导入到单元</label>
+      <select id="aiUnit" class="form-input" onchange="toggleNewUnitFields('ai')">
+        {% for unit in units %}
+        <option value="{{ unit.number }}">{{ unit.name }}</option>
+        {% endfor %}
+        <option value="new">➕ 新建单元…</option>
+      </select>
+      <div id="aiNewUnitFields" class="hidden grid grid-2" style="margin-top: 8px; gap: 8px;">
+        <input type="number" id="aiNewUnitNumber" class="form-input" placeholder="新单元编号" min="1">
+        <input type="text" id="aiNewUnitName" class="form-input" placeholder="单元名称（如 List 6）">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">词汇类别</label>
+      <select id="aiCategory" class="form-input">
+        <option value="required">必考词</option>
+        <option value="basic">基础词</option>
+        <option value="advanced">超纲词</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="flex gap-2 justify-end">
+    <button class="btn btn-primary" id="aiRecognizeBtn" onclick="runAIRecognize()"><i class="ph ph-magic-wand"></i> 识别单词</button>
+  </div>
+</div>
+
+<!-- Step 2: 识别结果 + 三级复审 -->
+<div class="card hidden" id="aiResultPane">
+  <div class="flex justify-between items-center" style="margin-bottom: 8px;">
+    <span class="text-sm text-secondary">识别到 <strong id="aiCount">0</strong> 个单词</span>
+    <span class="text-sm text-secondary">复核通过后才可导入，防止识别错误</span>
+  </div>
+
+  <!-- 复审状态条 -->
+  <div class="ai-review-bar">
+    <span class="ai-review-item" id="aiReviewAIStatus"><i class="ph ph-robot"></i> AI 复审 <em>未完成</em></span>
+    <span class="ai-review-item" id="aiReviewHumanStatus"><i class="ph ph-user-check"></i> 人工复审 <em>未完成</em></span>
+    <span class="ai-review-item" id="aiReviewSampleStatus"><i class="ph ph-shuffle"></i> 随机抽审 <em>未完成</em></span>
+  </div>
+
+  <!-- 复审操作区 -->
+  <div class="ai-review-actions">
+    <button class="btn btn-secondary btn-sm" id="aiReviewAIBtn" onclick="runAIReview()"><i class="ph ph-robot"></i> AI 复审</button>
+    <button class="btn btn-secondary btn-sm" id="aiReviewHumanBtn" onclick="markHumanReview()"><i class="ph ph-user-check"></i> 人工复审</button>
+    <button class="btn btn-secondary btn-sm" id="aiReviewSampleBtn" onclick="startRandomReview()"><i class="ph ph-shuffle"></i> 随机抽审</button>
+  </div>
+  <div id="aiReviewNote" class="text-sm" style="margin: 4px 0 8px; color: var(--c-text-3);"></div>
+
+  <!-- 审核进度条 + 日志输出 -->
+  <div id="aiProgressWrap" class="hidden" style="margin: 8px 0;">
+    <div class="flex justify-between items-center" style="margin-bottom: 4px;">
+      <span class="text-sm" id="aiProgressLabel">准备中…</span>
+      <span class="text-sm text-secondary" id="aiProgressPct">0%</span>
+    </div>
+    <div class="progress-bar">
+      <div class="progress-bar-fill" id="aiProgressFill" style="width: 0%;"></div>
+    </div>
+  </div>
+  <div id="aiLogBox" class="hidden" style="margin: 8px 0; max-height: 160px; overflow-y: auto; background: var(--c-bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; font-size: var(--fs-xs); font-family: monospace; line-height: 1.6;"></div>
+
+  <div style="overflow-x: auto; max-height: 300px; overflow-y: auto;">
+    <table class="data-table" style="font-size: var(--fs-xs);">
+      <thead>
+        <tr>
+          <th style="width: 30px;"><input type="checkbox" id="aiCheckAll" checked onchange="toggleAIAll(this)"></th>
+          <th>单词</th>
+          <th>音标</th>
+          <th>词性</th>
+          <th>释义</th>
+          <th>复审标记</th>
+          <th style="width: 36px;"></th>
+        </tr>
+      </thead>
+      <tbody id="aiResultBody"></tbody>
+    </table>
+  </div>
+  <div class="flex gap-2 justify-between" style="margin-top: 12px;">
+    <button class="btn btn-secondary" onclick="backToAIConfig()"><i class="ph ph-arrow-left"></i> 返回修改</button>
+    <button class="btn btn-primary" id="aiImportBtn" onclick="aiImportConfirm()" disabled><i class="ph ph-check"></i> 导入选中 (0)</button>
+  </div>
+</div>
+
+<!-- ===== 复审核对弹窗（人工复审 / 随机抽审 / AI 复审报告） ===== -->
+<div id="aiReviewModal" class="modal-overlay hidden" onclick="if (event.target === this) closeAIReviewModal()">
+  <div class="modal" style="max-width: 560px;">
+    <div class="flex justify-between items-center" style="margin-bottom: 12px;">
+      <h3 style="margin: 0; font-size: var(--fs-lg);" id="aiReviewModalTitle"><i class="ph ph-robot" style="color: var(--c-green);"></i> 复审核对</h3>
+      <button class="btn btn-ghost" onclick="closeAIReviewModal()" title="关闭"><i class="ph ph-x"></i></button>
+    </div>
+
+    <!-- 人工复审/随机抽审：逐条核对 -->
+    <div id="aiReviewItemPane">
+      <div class="flex justify-between items-center" style="margin-bottom: 10px;">
+        <span class="text-sm text-secondary" id="aiReviewProgress"></span>
+        <span class="text-sm text-secondary" id="aiReviewTypeHint"></span>
+      </div>
+      <div id="aiReviewItemBox"></div>
+      <div class="flex gap-2 justify-between" style="margin-top: 14px;">
+        <button class="btn btn-secondary" id="aiReviewDeleteBtn" onclick="aiReviewDeleteCurrent()"><i class="ph ph-trash"></i> 删除</button>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary" onclick="aiReviewSaveAndNext(false)"><i class="ph ph-arrow-right"></i> 正确，下一个</button>
+          <button class="btn btn-primary" onclick="aiReviewSaveAndNext(true)"><i class="ph ph-check"></i> 保存修改</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI 复审：修正报告 -->
+    <div id="aiReviewReportPane" class="hidden">
+      <div class="text-sm" style="max-height: 340px; overflow-y: auto; margin-bottom: 12px;" id="aiReviewReportBody"></div>
+      <div class="flex gap-2 justify-end">
+        <button class="btn btn-primary" onclick="closeAIReviewModal()">知道了</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 模型管理 Modal（仿 Trae 模型管理面板） ===== -->
+<div id="modelManagerModal" class="modal-overlay hidden" onclick="if (event.target === this) closeModelManager()">
+  <div class="modal" style="max-width: 680px;">
+    <div class="flex justify-between items-center" style="margin-bottom: 8px;">
+      <h3 style="margin: 0; font-size: var(--fs-lg);"><i class="ph ph-sliders-horizontal" style="color: var(--c-green);"></i> 模型管理</h3>
+      <button class="btn btn-ghost" onclick="closeModelManager()" title="关闭"><i class="ph ph-x"></i></button>
+    </div>
+    <p class="text-sm text-secondary" style="margin: 0 0 12px 0;">添加并管理用于识别单词的模型。添加模型时会对 API 密钥进行验证。</p>
+
+    <div class="flex justify-between items-center" style="margin-bottom: 12px;">
+      <span class="text-sm text-secondary"><span id="modelCount">0</span> 个模型</span>
+      <button class="btn btn-primary btn-sm" onclick="openAddModel()"><i class="ph ph-plus"></i> 添加模型</button>
+    </div>
+
+    <div id="modelList" class="flex flex-col" style="gap: 8px; max-height: 380px; overflow-y: auto;"></div>
+  </div>
+</div>
+
+<!-- ===== 添加模型 Modal（仿 Trae 添加模型窗口） ===== -->
+<div id="addModelModal" class="modal-overlay hidden" onclick="if (event.target === this) closeAddModel()">
+  <div class="modal" style="max-width: 520px;">
+    <input type="hidden" id="amEditId" value="">
+    <div class="flex justify-between items-center" style="margin-bottom: 16px;">
+      <h3 id="amModalTitle" style="margin: 0; font-size: var(--fs-lg);"><i class="ph ph-plus" style="color: var(--c-green);"></i> 添加模型</h3>
+      <button class="btn btn-ghost" onclick="closeAddModel()" title="关闭"><i class="ph ph-x"></i></button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">模型服务商</label>
+      <select id="amProvider" class="form-input" onchange="changeAMProvider()"></select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">模型</label>
+      <select id="amModelPreset" class="form-input" onchange="onAMPresetChange()"></select>
+      <div id="amCustomModelWrap" class="hidden" style="margin-top: 8px;">
+        <input type="text" id="amModelId" class="form-input" placeholder="输入模型 ID，如 gpt-4o">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">API 格式</label>
+      <div class="form-input" style="background: var(--c-bg); color: var(--c-text-3); cursor: default;">OpenAI Chat Completions 格式（兼容 /v1/chat/completions）</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">API 密钥 <span class="text-secondary" style="font-weight: normal;">（本机服务可留空）</span> <a href="https://platform.openai.com/api-keys" target="_blank" class="text-sm" style="color: var(--c-green); margin-left: 6px;">获取 API 密钥 →</a></label>
+      <div class="ai-key-wrap">
+        <input type="password" id="amApiKey" class="form-input" placeholder="sk-...（无鉴权服务可不填）" autocomplete="off">
+        <button type="button" class="ai-key-toggle" id="amKeyToggle" onclick="toggleAMKeyVisible()" title="显示/隐藏密钥"><i class="ph ph-eye"></i></button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <div class="flex justify-between items-center">
+        <label class="form-label" style="margin: 0;">自定义请求地址 <span class="text-secondary" style="font-weight: normal;">（可选）</span></label>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-secondary">完整 URL</span>
+          <label class="switch"><input type="checkbox" id="amFullUrl" onchange="onAMFullUrlChange()"><span class="slider"></span></label>
+        </div>
+      </div>
+      <input type="text" id="amBaseUrl" class="form-input" placeholder="https://api.openai.com/v1">
+      <div id="amUrlHint" class="text-sm text-secondary" style="margin-top: 4px;">关闭：填基础地址，自动拼接 /chat/completions；打开：直接填完整请求地址，如 http://localhost:4096/v1/chat/completions</div>
+    </div>
+
+    <div class="form-group">
+      <button type="button" class="text-sm" style="background:none;border:none;color:var(--c-text-3);cursor:pointer;padding:0;" onclick="toggleAMAdvanced()">
+        <i class="ph ph-caret-right" id="amAdvCaret"></i> 高级配置
+      </button>
+      <div id="amAdvanced" class="hidden grid grid-2" style="margin-top: 8px; gap: 8px;">
+        <div>
+          <label class="form-label">模型展示名称</label>
+          <input type="text" id="amDisplayName" class="form-input" placeholder="留空默认显示模型 ID">
+        </div>
+        <div>
+          <label class="form-label">上下文窗口</label>
+          <select id="amContext" class="form-input">
+            <option value="32K">32K</option>
+            <option value="128K" selected>128K</option>
+            <option value="256K">256K</option>
+            <option value="1M">1M</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div id="amTestResult" class="ai-test-result" style="margin: 8px 0;"></div>
+
+    <div class="flex gap-2 justify-end">
+      <button class="btn btn-secondary" onclick="closeAddModel()">取消</button>
+      <button class="btn btn-primary" id="amSubmitBtn" onclick="submitAddModel()"><i class="ph ph-check"></i> 添加模型</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  // ===== AI 单词导入（图片 / 纯文本 / 文件） =====
+  // 模型服务商预设（仿 Trae 的模型服务商列表，全部为 OpenAI 兼容接口）
+  // models 元素: { id: 模型ID, vision: 是否支持图片识别 }
+  var AI_PROVIDERS = [
+    { id: 'openai', name: 'OpenAI', base: 'https://api.openai.com/v1', models: [
+      { id: 'gpt-4o', vision: true }, { id: 'gpt-4o-mini', vision: true },
+      { id: 'gpt-4.1', vision: true }, { id: 'gpt-4.1-mini', vision: true },
+    ]},
+    { id: 'gemini', name: 'Google Gemini', base: 'https://generativelanguage.googleapis.com/v1beta/openai', models: [
+      { id: 'gemini-2.5-pro', vision: true }, { id: 'gemini-2.5-flash', vision: true },
+      { id: 'gemini-2.0-flash', vision: true },
+    ]},
+    { id: 'anthropic', name: 'Anthropic Claude', base: 'https://api.anthropic.com/v1', models: [
+      { id: 'claude-sonnet-4-5', vision: true }, { id: 'claude-opus-4-1', vision: true },
+      { id: 'claude-3-7-sonnet', vision: true },
+    ]},
+    { id: 'xai', name: 'xAI (Grok)', base: 'https://api.x.ai/v1', models: [
+      { id: 'grok-4', vision: true }, { id: 'grok-4-fast', vision: true }, { id: 'grok-3', vision: true },
+    ]},
+    { id: 'qwen', name: '通义千问 (阿里云百炼)', base: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: [
+      { id: 'qwen-vl-max', vision: true }, { id: 'qwen-vl-plus', vision: true },
+      { id: 'qwen2.5-vl-72b-instruct', vision: true },
+    ]},
+    { id: 'zhipu', name: '智谱 GLM (BigModel)', base: 'https://open.bigmodel.cn/api/paas/v4', models: [
+      { id: 'glm-4v-plus', vision: true }, { id: 'glm-4v-flash', vision: true },
+      { id: 'glm-4.5v', vision: true }, { id: 'glm-4.5', vision: false },
+    ]},
+    { id: 'deepseek', name: 'DeepSeek', base: 'https://api.deepseek.com/v1', models: [
+      { id: 'deepseek-chat', vision: false }, { id: 'deepseek-reasoner', vision: false },
+    ]},
+    { id: 'kimi', name: '月之暗面 Kimi', base: 'https://api.moonshot.cn/v1', models: [
+      { id: 'kimi-latest', vision: true }, { id: 'moonshot-v1-8k', vision: true },
+    ]},
+    { id: 'siliconflow', name: '硅基流动 SiliconFlow', base: 'https://api.siliconflow.cn/v1', models: [
+      { id: 'Qwen/Qwen2.5-VL-72B-Instruct', vision: true },
+      { id: 'Qwen/Qwen2.5-VL-32B-Instruct', vision: true },
+      { id: 'deepseek-ai/deepseek-vl2', vision: true },
+    ]},
+    { id: 'ark', name: '火山引擎 (豆包)', base: 'https://ark.cn-beijing.volces.com/api/v3', models: [
+      { id: 'doubao-seed-1.6-vision', vision: true },
+      { id: 'doubao-1.5-vision-pro', vision: true },
+    ]},
+    { id: 'hunyuan', name: '腾讯混元', base: 'https://api.hunyuan.cloud.tencent.com/v1', models: [
+      { id: 'hunyuan-vision', vision: true }, { id: 'hunyuan-lite', vision: true },
+    ]},
+    { id: 'qianfan', name: '百度千帆', base: 'https://qianfan.baidubce.com/v2', models: [
+      { id: 'ernie-4.5-vl-8b', vision: true }, { id: 'ernie-4.5-vl-2b-fp8', vision: true },
+    ]},
+    { id: 'minimax', name: 'MiniMax', base: 'https://api.minimax.chat/v1', models: [
+      { id: 'MiniMax-VL-01', vision: true }, { id: 'MiniMax-M2', vision: true },
+    ]},
+    { id: 'groq', name: 'Groq', base: 'https://api.groq.com/openai/v1', models: [
+      { id: 'llama-3.2-90b-vision-preview', vision: true },
+      { id: 'llama-3.2-11b-vision-preview', vision: true },
+    ]},
+    { id: 'mistral', name: 'Mistral', base: 'https://api.mistral.ai/v1', models: [
+      { id: 'pixtral-large-2509', vision: true }, { id: 'pixtral-12b', vision: true },
+    ]},
+    { id: 'openrouter', name: 'OpenRouter', base: 'https://openrouter.ai/api/v1', models: [
+      { id: 'openai/gpt-4o', vision: true }, { id: 'google/gemini-2.5-flash', vision: true },
+    ]},
+    { id: 'ollama', name: 'Ollama (本地)', base: 'http://localhost:11434/v1', models: [
+      { id: 'llama3.2-vision', vision: true }, { id: 'qwen2.5-vl', vision: true },
+    ]},
+    { id: 'novita', name: 'Novita', base: 'https://api.novita.ai/v3/openai', models: [
+      { id: 'google/gemini-2.5-flash', vision: true }, { id: 'meta-llama/llama-3.2-90b-vision', vision: true },
+    ]},
+    { id: 'zai', name: 'Z.ai (GLM 海外)', base: 'https://api.z.ai/api/paas/v4', models: [
+      { id: 'glm-4.5v', vision: true }, { id: 'glm-4v-plus', vision: true },
+    ]},
+    { id: 'opencode', name: 'opencode (本地服务)', base: 'http://localhost:4096/v1', models: [] },
+    { id: 'custom', name: '自定义（OpenAI 兼容）', base: 'https://api.openai.com/v1', models: [] },
+  ];
+
+  // 已配置模型列表（localStorage: vocab-ai-models）— 仿 Trae 的模型管理面板
+  var aiModels = loadAIModels();
+  var aiSource = 'image';        // 当前输入源: image / text / file
+  var aiImageB64 = '';           // 图片 base64（不含 data: 前缀）
+  var aiFileContent = '';        // 文本文件内容
+  var aiFileName = '';
+  var aiReviewState = { ai: false, human: false, sample: false };  // 三级复审状态
+  var aiWords = [];   // 识别结果 [{word, phonetic_us, phonetic_uk, pos, meanings, example_en, example_zh, checked}]
+  var aiSampleQueue = [];        // 随机抽审队列
+
+  function escapeHtml(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function loadAIModels() {
+    try { return JSON.parse(localStorage.getItem('vocab-ai-models') || '[]'); }
+    catch (e) { return []; }
+  }
+  function saveAIModels() {
+    localStorage.setItem('vocab-ai-models', JSON.stringify(aiModels));
+  }
+  function aiProviderInfo(pid) {
+    return AI_PROVIDERS.find(function (p) { return p.id === pid; }) || AI_PROVIDERS[AI_PROVIDERS.length - 1];
+  }
+  // 判断模型是否支持图片识别（视觉模型）；自定义模型默认按视觉处理
+  function isVisionModel(m) {
+    if (!m) return false;
+    var p = aiProviderInfo(m.provider);
+    var preset = p.models.find(function (x) { return x.id === m.model_id; });
+    if (preset) return preset.vision;
+    if (m.provider === 'custom' || m.vision !== undefined) return m.vision !== false;
+    return true;
+  }
+  function visionTag(m) {
+    return isVisionModel(m) ? '<span class="ai-vision-tag">视觉</span>' : '<span class="ai-vision-tag ai-vision-no">不支持图片（文本模式）</span>';
+  }
+
+  // 页面初始化：读取 URL 中的单元参数，无模型时引导配置
+  function initPage() {
+    refreshAIModelSelect();
+    var params = new URLSearchParams(window.location.search);
+    var unitNum = params.get('unit');
+    var unitSel = document.getElementById('aiUnit');
+    if (unitNum && Array.prototype.some.call(unitSel.options, function (o) { return o.value == unitNum; })) {
+      unitSel.value = unitNum;
+    }
+    // 无任何已配置模型时，引导用户进入模型管理
+    if (aiModels.length === 0) {
+      setTimeout(function () { openModelManager(); }, 300);
+    }
+  }
+  document.addEventListener('DOMContentLoaded', initPage);
+
+  // 切换输入源（图片 / 纯文本 / 文件）
+  function switchAISource(src, silent) {
+    aiSource = src;
+    ['image', 'text', 'file'].forEach(function (s) {
+      document.getElementById('aiTab' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('active', s === src);
+      document.getElementById('aiSource' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('hidden', s !== src);
+    });
+    if (!silent) {
+      var m = getSelectedAIModel();
+      if (src === 'image' && m && !isVisionModel(m)) {
+        showToast('当前模型不支持图片识别，建议切换到「纯文本」或「文件」方式导入', 'error');
+      }
+    }
+  }
+
+  // ---- 模型选择 ----
+  function refreshAIModelSelect() {
+    var sel = document.getElementById('aiModelSelect');
+    var lastId = sel.value;
+    var enabled = aiModels.filter(function (m) { return m.enabled; });
+    sel.innerHTML = '';
+    if (enabled.length === 0) {
+      var opt = document.createElement('option');
+      opt.value = ''; opt.textContent = '暂无可用模型，请点击「管理模型」添加';
+      sel.appendChild(opt);
+      sel.disabled = true;
+    } else {
+      sel.disabled = false;
+      enabled.forEach(function (m) {
+        var opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = (m.display_name || m.model_id) + ' · ' + aiProviderInfo(m.provider).name + (isVisionModel(m) ? ' · 视觉' : ' · 文本模式');
+        sel.appendChild(opt);
+      });
+      if (lastId && enabled.some(function (m) { return m.id === lastId; })) sel.value = lastId;
+    }
+    onAIModelSelectChange();
+  }
+
+  function getSelectedAIModel() {
+    var sel = document.getElementById('aiModelSelect');
+    return aiModels.find(function (m) { return m.id === sel.value; }) || null;
+  }
+
+  function onAIModelSelectChange() {
+    var m = getSelectedAIModel();
+    var info = document.getElementById('aiModelInfo');
+    if (!m) { info.innerHTML = ''; return; }
+    var keyState = m.api_key
+      ? '<span style="color: var(--c-green);">已配置密钥</span>'
+      : '<span style="color: var(--c-text-3);">无密钥</span>';
+    var addr = m.endpoint || m.base_url || aiProviderInfo(m.provider).base;
+    info.innerHTML = visionTag(m) + ' ' + aiProviderInfo(m.provider).name + ' · ' + escapeHtml(addr) + ' · ' + keyState;
+  }
+
+  // ---- 模型管理面板（仿 Trae 模型管理） ----
+  function openModelManager() {
+    document.getElementById('modelManagerModal').classList.remove('hidden');
+    renderModelList();
+  }
+  function closeModelManager() {
+    document.getElementById('modelManagerModal').classList.add('hidden');
+  }
+
+  function maskKey(key) {
+    if (!key) return '未配置';
+    if (key.length <= 8) return '****';
+    return key.slice(0, 3) + '****' + key.slice(-4);
+  }
+
+  function renderModelList() {
+    var list = document.getElementById('modelList');
+    document.getElementById('modelCount').textContent = aiModels.length;
+    if (aiModels.length === 0) {
+      list.innerHTML = '<div class="text-secondary text-sm" style="text-align:center; padding: 28px;">暂无模型<br>点击右上角「添加模型」，选择服务商并填写 API 密钥</div>';
+      return;
+    }
+    list.innerHTML = aiModels.map(function (m) {
+      var p = aiProviderInfo(m.provider);
+      return '<div class="card" style="padding: 12px;">' +
+        '<div class="flex justify-between items-center">' +
+          '<div style="min-width: 0;">' +
+            '<strong>' + escapeHtml(m.display_name || m.model_id) + '</strong> ' + visionTag(m) +
+            '<div class="text-sm text-secondary" style="margin-top: 2px;">' + escapeHtml(p.name) + ' · ' + escapeHtml(m.model_id) + ' · ' + maskKey(m.api_key) + ' · ' + escapeHtml(m.context || '128K') + '</div>' +
+          '</div>' +
+          '<div class="flex items-center gap-2">' +
+            '<span class="text-sm" style="color: ' + (m.enabled ? 'var(--c-green)' : 'var(--c-text-3)') + ';">' + (m.enabled ? '已启用' : '已禁用') + '</span>' +
+            '<label class="switch"><input type="checkbox" ' + (m.enabled ? 'checked' : '') + ' onchange="toggleAIModel(\'' + m.id + '\')"><span class="slider"></span></label>' +
+            '<button class="btn btn-sm btn-secondary" onclick="editAIModel(\'' + m.id + '\')" title="编辑模型"><i class="ph ph-pencil-simple"></i></button>' +
+            '<button class="btn btn-sm btn-danger" onclick="deleteAIModel(\'' + m.id + '\')" title="删除模型"><i class="ph ph-trash"></i></button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function toggleAIModel(id) {
+    var m = aiModels.find(function (x) { return x.id === id; });
+    if (m) { m.enabled = !m.enabled; saveAIModels(); renderModelList(); refreshAIModelSelect(); }
+  }
+
+  function deleteAIModel(id) {
+    var m = aiModels.find(function (x) { return x.id === id; });
+    if (!m) return;
+    if (!confirm('确定删除模型「' + (m.display_name || m.model_id) + '」吗？\n删除后需重新配置才能使用。')) return;
+    aiModels = aiModels.filter(function (x) { return x.id !== id; });
+    saveAIModels(); renderModelList(); refreshAIModelSelect();
+  }
+
+  function editAIModel(id) {
+    var m = aiModels.find(function (x) { return x.id === id; });
+    if (!m) return;
+    fillAddModel(m);
+    document.getElementById('amEditId').value = id;
+    document.getElementById('amModalTitle').textContent = '编辑模型';
+    document.getElementById('amSubmitBtn').innerHTML = '<i class="ph ph-check"></i> 保存模型';
+    document.getElementById('addModelModal').classList.remove('hidden');
+  }
+
+  // ---- 添加模型窗口（仿 Trae 添加模型） ----
+  function openAddModel() {
+    fillAddModel(null);
+    document.getElementById('amEditId').value = '';
+    document.getElementById('amModalTitle').textContent = '添加模型';
+    document.getElementById('amSubmitBtn').innerHTML = '<i class="ph ph-check"></i> 添加模型';
+    document.getElementById('addModelModal').classList.remove('hidden');
+  }
+  function closeAddModel() {
+    document.getElementById('addModelModal').classList.add('hidden');
+  }
+
+  function fillAddModel(m) {
+    var psel = document.getElementById('amProvider');
+    psel.innerHTML = '';
+    AI_PROVIDERS.forEach(function (p) {
+      var opt = document.createElement('option');
+      opt.value = p.id; opt.textContent = p.name;
+      psel.appendChild(opt);
+    });
+    psel.value = m ? m.provider : AI_PROVIDERS[0].id;
+    renderAMPresets(psel.value);
+
+    var preset = document.getElementById('amModelPreset');
+    var inPreset = Array.prototype.some.call(preset.options, function (o) { return o.value === (m ? m.model_id : ''); });
+    if (m && !inPreset) {
+      preset.value = '__custom__';
+      document.getElementById('amCustomModelWrap').classList.remove('hidden');
+      document.getElementById('amModelId').value = m.model_id;
+    } else if (m) {
+      preset.value = m.model_id;
+      document.getElementById('amCustomModelWrap').classList.add('hidden');
+    } else {
+      document.getElementById('amCustomModelWrap').classList.add('hidden');
+    }
+
+    document.getElementById('amApiKey').value = m ? (m.api_key || '') : '';
+    document.getElementById('amBaseUrl').value = m ? (m.endpoint || m.base_url || '') : '';
+    document.getElementById('amFullUrl').checked = !!(m && m.endpoint);
+    onAMFullUrlChange();
+    document.getElementById('amDisplayName').value = m ? (m.display_name || '') : '';
+    document.getElementById('amContext').value = m ? (m.context || '128K') : '128K';
+    document.getElementById('amAdvanced').classList.add('hidden');
+    document.getElementById('amAdvCaret').className = 'ph ph-caret-right';
+    document.getElementById('amTestResult').className = 'ai-test-result';
+    document.getElementById('amTestResult').innerHTML = '';
+  }
+
+  function changeAMProvider() {
+    renderAMPresets(document.getElementById('amProvider').value);
+  }
+
+  function renderAMPresets(pid) {
+    var p = aiProviderInfo(pid);
+    var sel = document.getElementById('amModelPreset');
+    sel.innerHTML = '';
+    p.models.forEach(function (m) {
+      var opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.id + (m.vision ? '（视觉）' : '（文本模式）');
+      sel.appendChild(opt);
+    });
+    var opt2 = document.createElement('option');
+    opt2.value = '__custom__'; opt2.textContent = '使用其他模型';
+    sel.appendChild(opt2);
+    sel.value = p.models.length ? p.models[0].id : '__custom__';
+    onAMPresetChange();
+  }
+
+  function onAMPresetChange() {
+    var custom = document.getElementById('amModelPreset').value === '__custom__';
+    document.getElementById('amCustomModelWrap').classList.toggle('hidden', !custom);
+    if (custom) document.getElementById('amModelId').value = '';
+  }
+
+  function toggleAMAdvanced() {
+    var adv = document.getElementById('amAdvanced');
+    var show = adv.classList.toggle('hidden');
+    document.getElementById('amAdvCaret').className = show ? 'ph ph-caret-right' : 'ph ph-caret-down';
+  }
+
+  // 完整 URL 开关（仿 Trae）：开 → 直接使用完整请求地址
+  function onAMFullUrlChange() {
+    var full = document.getElementById('amFullUrl').checked;
+    var input = document.getElementById('amBaseUrl');
+    var hint = document.getElementById('amUrlHint');
+    if (full) {
+      input.placeholder = 'http://localhost:4096/v1/chat/completions';
+      hint.textContent = '将直接使用该完整地址发起请求（不再自动拼接 /chat/completions）';
+    } else {
+      input.placeholder = 'https://api.openai.com/v1';
+      hint.textContent = '关闭：填基础地址，自动拼接 /chat/completions；打开：直接填完整请求地址，如 http://localhost:4096/v1/chat/completions';
+    }
+  }
+
+  function toggleAMKeyVisible() {
+    var input = document.getElementById('amApiKey');
+    var icon = document.querySelector('#amKeyToggle i');
+    if (input.type === 'password') {
+      input.type = 'text';
+      icon.className = 'ph ph-eye-slash';
+    } else {
+      input.type = 'password';
+      icon.className = 'ph ph-eye';
+    }
+  }
+
+  // 提交添加/编辑模型（仿 Trae：添加时验证连接有效性）
+  async function submitAddModel() {
+    var editId = document.getElementById('amEditId').value;
+    var provider = document.getElementById('amProvider').value;
+    var preset = document.getElementById('amModelPreset').value;
+    var modelId = preset === '__custom__' ? document.getElementById('amModelId').value.trim() : preset;
+    var apiKey = document.getElementById('amApiKey').value.trim();
+    var customUrl = document.getElementById('amBaseUrl').value.trim();
+    var fullUrl = document.getElementById('amFullUrl').checked;
+    var displayName = document.getElementById('amDisplayName').value.trim();
+    var context = document.getElementById('amContext').value;
+
+    if (!modelId) { showToast('请填写模型 ID', 'error'); return; }
+
+    // 视觉能力判断：预置模型按标记，自定义默认支持；非视觉模型可通过文本/文件方式导入
+    var vision = true;
+    if (preset !== '__custom__') {
+      var pCheck = aiProviderInfo(provider);
+      var presetObj = pCheck.models.find(function (x) { return x.id === preset; });
+      vision = presetObj ? presetObj.vision : true;
+    }
+
+    var p = aiProviderInfo(provider);
+    var endpoint = '';                 // 完整请求地址（打开"完整 URL"开关时）
+    var baseUrl = p.base;              // 基础地址（关闭开关时）
+    if (fullUrl) {
+      endpoint = customUrl;
+      if (!endpoint) { showToast('请填写完整的请求地址，如 http://localhost:4096/v1/chat/completions', 'error'); return; }
+      baseUrl = '';
+    } else if (customUrl) {
+      baseUrl = customUrl;
+    }
+
+    var btn = document.getElementById('amSubmitBtn');
+    var box = document.getElementById('amTestResult');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i> 验证连接中…';
+    box.className = 'ai-test-result';
+    box.innerHTML = '<span class="ai-test-loading"><i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i> 正在验证连接…</span>';
+
+    try {
+      var res = await VOCAB_API.post('/api/ai/test/', {
+        api_key: apiKey,
+        base_url: baseUrl,
+        endpoint: endpoint,
+        model: modelId,
+      });
+      if (!res.success) {
+        box.className = 'ai-test-result ai-test-fail';
+        var hint = res.key_invalid ? '（密钥无效，请检查后重试）' : (res.model_invalid ? '（模型或接口地址错误）' : '');
+        box.innerHTML = '<i class="ph ph-x-circle"></i> ' + (res.error || '验证失败') + hint;
+        return;
+      }
+      var model = {
+        id: editId || ('m' + Date.now()),
+        provider: provider,
+        model_id: modelId,
+        display_name: displayName,
+        base_url: baseUrl,
+        endpoint: endpoint,
+        api_key: apiKey,
+        context: context,
+        vision: vision,
+        enabled: true,
+      };
+      if (editId) {
+        var idx = aiModels.findIndex(function (x) { return x.id === editId; });
+        if (idx !== -1) aiModels[idx] = model; else aiModels.push(model);
+      } else {
+        aiModels.push(model);
+      }
+      saveAIModels();
+      renderModelList();
+      refreshAIModelSelect();
+      box.className = 'ai-test-result ai-test-ok';
+      box.innerHTML = '<i class="ph ph-check-circle"></i> 连接成功，模型已' + (editId ? '更新' : '添加');
+      setTimeout(function () { closeAddModel(); }, 700);
+    } catch (e) {
+      box.className = 'ai-test-result ai-test-fail';
+      box.innerHTML = '<i class="ph ph-x-circle"></i> 验证请求失败';
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ph ph-check"></i> ' + (editId ? '保存模型' : '添加模型');
+    }
+  }
+
+  function handleAIFile(input) {
+    var file = input.files && input.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { showToast('请选择图片文件', 'error'); return; }
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      // 压缩图片，避免超长请求
+      compressImage(e.target.result, function (dataUrl) {
+        aiImageB64 = dataUrl.split(',')[1] || '';
+        document.getElementById('aiUploadHint').style.display = 'none';
+        var preview = document.getElementById('aiPreview');
+        preview.src = dataUrl;
+        preview.style.display = 'block';
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // 上传文本文件（.txt / .md / .csv），读取内容交给 AI 整理
+  function handleAIFileUpload(input) {
+    var file = input.files && input.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      aiFileContent = e.target.result || '';
+      aiFileName = file.name || '';
+      if (aiFileContent.length > 60000) {
+        aiFileContent = aiFileContent.slice(0, 60000);
+        showToast('文件较大，已截取前 60000 字符', 'error');
+      }
+      document.getElementById('aiFileUploadHint').style.display = 'none';
+      var info = document.getElementById('aiFileInfo');
+      info.classList.remove('hidden');
+      info.innerHTML = '<i class="ph ph-file-text"></i> ' + escapeHtml(aiFileName) + '（' + aiFileContent.length + ' 字符）<button class="btn btn-sm btn-ghost" onclick="clearAIFileUpload()">移除</button>';
+    };
+    reader.readAsText(file, 'utf-8');
+  }
+
+  function clearAIFileUpload() {
+    aiFileContent = ''; aiFileName = '';
+    document.getElementById('aiFileUpload').value = '';
+    document.getElementById('aiFileUploadHint').style.display = '';
+    document.getElementById('aiFileInfo').classList.add('hidden');
+  }
+
+  function compressImage(dataUrl, callback) {
+    var img = new Image();
+    img.onload = function () {
+      var maxW = 1280;
+      var scale = Math.min(1, maxW / img.width);
+      var canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      callback(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.src = dataUrl;
+  }
+  async function runAIRecognize() {
+    var model = getSelectedAIModel();
+    if (!model) { showToast('请先在「管理模型」中添加并启用模型', 'error'); return; }
+    if (!model.api_key) { showToast('该模型未配置 API 密钥，请点击「管理模型」补充', 'error'); return; }
+
+    var payload = {
+      api_key: model.api_key,
+      base_url: model.base_url || aiProviderInfo(model.provider).base,
+      endpoint: model.endpoint || '',
+      model: model.model_id,
+    };
+
+    if (aiSource === 'image') {
+      if (!aiImageB64) { showToast('请先上传图片', 'error'); return; }
+      if (!isVisionModel(model)) {
+        showToast('「' + (model.display_name || model.model_id) + '」不支持图片识别，请切换到「纯文本」或「文件」方式，或在「管理模型」中选择带（视觉）标记的模型', 'error');
+        return;
+      }
+      payload.image = aiImageB64;
+    } else if (aiSource === 'text') {
+      var txt = document.getElementById('aiTextInput').value.trim();
+      if (!txt) { showToast('请粘贴要识别的单词文本', 'error'); return; }
+      payload.text_content = txt;
+    } else if (aiSource === 'file') {
+      if (!aiFileContent) { showToast('请先上传文本文件', 'error'); return; }
+      payload.file_content = aiFileContent;
+      payload.file_name = aiFileName;
+    }
+
+    var btn = document.getElementById('aiRecognizeBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i> 识别中…';
+
+    try {
+      var res = await VOCAB_API.post('/api/ai/recognize/', payload);
+      if (res.words) {
+        aiWords = res.words.map(function (w) {
+          w.checked = true;
+          return w;
+        });
+        clearAILog();
+        appendAILog('识别完成：共 ' + aiWords.length + ' 个单词，请依次完成「AI 复审 → 人工复审 → 随机抽审」后再导入');
+        aiReviewState = { ai: false, human: false, sample: false };
+        renderAIResults();
+        renderAIReviewStatus();
+        document.getElementById('aiConfigPane').classList.add('hidden');
+        document.getElementById('aiResultPane').classList.remove('hidden');
+        document.getElementById('aiResultPane').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        showToast(res.error || '识别失败', 'error');
+      }
+    } catch (e) {
+      showToast(e.error || e.message || '识别请求失败', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ph ph-magic-wand"></i> 识别单词';
+    }
+  }
+
+  function renderAIResults() {
+    var tbody = document.getElementById('aiResultBody');
+    tbody.innerHTML = '';
+    document.getElementById('aiCount').textContent = aiWords.length;
+    aiWords.forEach(function (w, i) {
+      var tr = document.createElement('tr');
+      var markHtml = '';
+      if (w.aiIssue) {
+        markHtml = '<span class="ai-mark ai-mark-issue" title="' + escapeHtml(w.aiIssue) + '"><i class="ph ph-warning"></i> AI 已修正</span>';
+      } else if (w.aiChecked) {
+        markHtml = '<span class="ai-mark ai-mark-ok"><i class="ph ph-check"></i> AI 通过</span>';
+      }
+      if (w.humanChecked) {
+        markHtml += '<span class="ai-mark ai-mark-ok"><i class="ph ph-user-check"></i> 人工</span>';
+      }
+      tr.innerHTML =
+        '<td><input type="checkbox" data-ai-index="' + i + '" onchange="aiToggleRow(this)"' + (w.checked ? ' checked' : '') + '></td>' +
+        '<td><input class="form-input ai-cell' + (w.aiIssue ? ' ai-cell-warn' : '') + '" data-ai-field="word" data-ai-index="' + i + '" value="' + escapeHtml(w.word || '') + '"></td>' +
+        '<td><input class="form-input ai-cell" data-ai-field="phonetic_us" data-ai-index="' + i + '" value="' + escapeHtml(w.phonetic_us || '') + '"></td>' +
+        '<td><input class="form-input ai-cell" data-ai-field="pos" data-ai-index="' + i + '" value="' + escapeHtml(w.pos || '') + '" style="width:70px;"></td>' +
+        '<td><input class="form-input ai-cell' + (w.aiIssue ? ' ai-cell-warn' : '') + '" data-ai-field="meanings" data-ai-index="' + i + '" value="' + escapeHtml((w.meanings || []).join('; ')) + '"></td>' +
+        '<td class="ai-mark-cell">' + (markHtml || '<span class="text-secondary" style="font-size: 11px;">待复核</span>') + '</td>' +
+        '<td><button class="btn btn-sm btn-danger" onclick="aiDeleteRow(' + i + ')">✕</button></td>';
+      tbody.appendChild(tr);
+    });
+    updateAIImportBtn();
+  }
+
+  function renderAIReviewStatus() {
+    var cfg = [
+      { id: 'aiReviewAIStatus', done: aiReviewState.ai, label: 'AI 复审' },
+      { id: 'aiReviewHumanStatus', done: aiReviewState.human, label: '人工复审' },
+      { id: 'aiReviewSampleStatus', done: aiReviewState.sample, label: '随机抽审' },
+    ];
+    cfg.forEach(function (c) {
+      var el = document.getElementById(c.id);
+      if (!el) return;
+      el.classList.toggle('done', c.done);
+      el.querySelector('em').textContent = c.done ? '已完成' : '未完成';
+    });
+    // 全部完成前禁用导入
+    var ready = aiReviewState.ai && aiReviewState.human && aiReviewState.sample;
+    document.getElementById('aiImportBtn').disabled = !ready || aiWords.filter(function (w) { return w.checked; }).length === 0;
+    document.getElementById('aiReviewNote').innerHTML = ready
+      ? '<span style="color: var(--c-green);"><i class="ph ph-check-circle"></i> 三级复审全部通过，可以导入</span>'
+      : '请依次完成「AI 复审 → 人工复审 → 随机抽审」后即可导入。识别结果表格可直接编辑，修改后请重新点击对应复审。';
+  }
+
+  // 编辑单元格后同步数据，并重置复审标记（修改后需重新复审）
+  document.getElementById('aiResultBody').addEventListener('input', function (e) {
+    var cell = e.target.closest('.ai-cell');
+    if (!cell) return;
+    var i = parseInt(cell.dataset.aiIndex);
+    var field = cell.dataset.aiField;
+    if (field === 'meanings') {
+      aiWords[i].meanings = cell.value.split(/[;；]/).map(function (s) { return s.trim(); }).filter(Boolean);
+    } else {
+      aiWords[i][field] = cell.value.trim();
+    }
+    aiWords[i].aiChecked = false;
+    aiWords[i].aiIssue = '';
+    aiWords[i].humanChecked = false;
+    aiReviewState.ai = false;
+    aiReviewState.human = false;
+    renderAIReviewStatus();
+    // 仅刷新标记列，避免光标丢失
+    var marks = document.querySelectorAll('#aiResultBody .ai-mark-cell');
+    if (marks[i]) {
+      marks[i].innerHTML = '<span class="text-secondary" style="font-size: 11px;">待复核</span>';
+    }
+  });
+
+  function aiToggleRow(chk) {
+    var i = parseInt(chk.dataset.aiIndex);
+    aiWords[i].checked = chk.checked;
+    updateAIImportBtn();
+  }
+
+  function toggleAIAll(chk) {
+    aiWords.forEach(function (w) { w.checked = chk.checked; });
+    document.querySelectorAll('#aiResultBody input[type="checkbox"]').forEach(function (c) { c.checked = chk.checked; });
+    updateAIImportBtn();
+  }
+
+  function aiDeleteRow(i) {
+    aiWords.splice(i, 1);
+    renderAIResults();
+  }
+
+  function updateAIImportBtn() {
+    var n = aiWords.filter(function (w) { return w.checked; }).length;
+    var btn = document.getElementById('aiImportBtn');
+    btn.innerHTML = '<i class="ph ph-check"></i> 导入选中 (' + n + ')';
+    var ready = aiReviewState.ai && aiReviewState.human && aiReviewState.sample;
+    btn.disabled = !ready || n === 0;
+  }
+
+  function backToAIConfig() {
+    document.getElementById('aiResultPane').classList.add('hidden');
+    document.getElementById('aiConfigPane').classList.remove('hidden');
+    document.getElementById('aiConfigPane').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ==================== 三级复审 ====================
+
+  // ---- 进度条与日志输出 ----
+  function appendAILog(msg, color) {
+    var box = document.getElementById('aiLogBox');
+    if (!box) return;
+    if (box.classList.contains('hidden')) box.classList.remove('hidden');
+    var line = document.createElement('div');
+    if (color) line.style.color = 'var(--' + color + ')';
+    line.textContent = '[' + new Date().toLocaleTimeString('zh-CN', { hour12: false }) + '] ' + msg;
+    box.appendChild(line);
+    box.scrollTop = box.scrollHeight;
+  }
+  function clearAILog() {
+    var box = document.getElementById('aiLogBox');
+    if (box) { box.innerHTML = ''; box.classList.add('hidden'); }
+    var wrap = document.getElementById('aiProgressWrap');
+    if (wrap) wrap.classList.add('hidden');
+  }
+  function setAIProgress(done, total, label) {
+    var wrap = document.getElementById('aiProgressWrap');
+    if (!wrap) return;
+    wrap.classList.remove('hidden');
+    var pct = total > 0 ? Math.round(done / total * 100) : 0;
+    document.getElementById('aiProgressPct').textContent = pct + '%';
+    document.getElementById('aiProgressLabel').textContent = label || (done + ' / ' + total);
+    document.getElementById('aiProgressFill').style.width = pct + '%';
+  }
+  function finishAIProgress(label) {
+    setAIProgress(1, 1, label);
+    setTimeout(function () {
+      var wrap = document.getElementById('aiProgressWrap');
+      if (wrap) wrap.classList.add('hidden');
+    }, 2500);
+  }
+
+  // ---- AI 复审：分批调用 AI 二次校验，发现问题自动修正并给出结果 ----
+  var AI_REVIEW_BATCH = 20;  // 每批复审的单词数（数据量大时分批，避免单次请求超时）
+
+  async function runAIReview() {
+    var model = getSelectedAIModel();
+    if (!model) { showToast('请先在「管理模型」中添加并启用模型', 'error'); return; }
+    if (!model.api_key) { showToast('该模型未配置 API 密钥，请点击「管理模型」补充', 'error'); return; }
+    if (aiWords.length === 0) { showToast('没有可复审的单词', 'error'); return; }
+
+    var btn = document.getElementById('aiReviewAIBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i> AI 复审中…';
+
+    clearAILog();
+    var total = aiWords.length;
+    var batches = [];
+    for (var i = 0; i < total; i += AI_REVIEW_BATCH) {
+      batches.push(aiWords.slice(i, i + AI_REVIEW_BATCH));
+    }
+    var fixedAll = [];
+    var issueAll = 0;
+    aiReviewResult = [];
+    appendAILog('开始 AI 复审：共 ' + total + ' 个单词，分 ' + batches.length + ' 批（每批最多 ' + AI_REVIEW_BATCH + ' 个）');
+    setAIProgress(0, batches.length, '准备复审…');
+
+    try {
+      for (var k = 0; k < batches.length; k++) {
+        var batch = batches[k];
+        appendAILog('正在复审第 ' + (k + 1) + '/' + batches.length + ' 批（' + batch.length + ' 个单词）…');
+        setAIProgress(k, batches.length, '第 ' + (k + 1) + '/' + batches.length + ' 批');
+        var res = await VOCAB_API.post('/api/ai/review/', {
+          words: batch.map(function (w) {
+            return { word: w.word, phonetic_us: w.phonetic_us, phonetic_uk: w.phonetic_uk, pos: w.pos, meanings: w.meanings, example_en: w.example_en, example_zh: w.example_zh };
+          }),
+          api_key: model.api_key,
+          base_url: model.base_url || aiProviderInfo(model.provider).base,
+          endpoint: model.endpoint || '',
+          model: model.model_id,
+        });
+        if (res.review === undefined) throw { error: res.error || 'AI 复审失败' };
+        aiReviewResult = aiReviewResult.concat(res.review);
+        var fixed = applyAIReviewFixesTo(res.review, batch);
+        fixedAll = fixedAll.concat(fixed);
+        issueAll += (res.issues || 0);
+        appendAILog('第 ' + (k + 1) + ' 批完成：发现 ' + (res.issues || 0) + ' 处问题，自动修正 ' + fixed.length + ' 处');
+        renderAIResults();
+        renderAIReviewStatus();
+        setAIProgress(k + 1, batches.length, '第 ' + (k + 1) + '/' + batches.length + ' 批完成');
+      }
+      finishAIProgress('AI 复审完成');
+      appendAILog('AI 复审全部完成：共 ' + total + ' 个单词，发现问题 ' + issueAll + ' 处，自动修正 ' + fixedAll.length + ' 处', 'c-green');
+      aiReviewState.ai = true;
+      renderAIReviewStatus();
+      renderAIReviewReport(fixedAll);
+      openAIReviewModal();
+    } catch (e) {
+      appendAILog('AI 复审出错：' + (e.error || e.message || '请求失败'), 'c-red');
+      showToast(e.error || e.message || 'AI 复审请求失败', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ph ph-robot"></i> AI 复审';
+    }
+  }
+
+  // 应用 AI 修正到指定批次的识别结果，返回修正详情列表 [{word, issues, changes: []}]
+  function applyAIReviewFixesTo(reviewArr, wordsArr) {
+    var fixed = [];
+    reviewArr.forEach(function (r) {
+      if (r.correct !== false || !r.fix) return;
+      var w = wordsArr.find(function (x) { return x.word === r.word; });
+      if (!w) return;
+      var d = { word: w.word, issues: (r.issues || []), changes: [] };
+      var fix = r.fix;
+      if (fix.word) {
+        d.changes.push('单词：' + (w.word || '') + ' → ' + fix.word);
+        w.word = String(fix.word).trim();
+      }
+      if (fix.phonetic_us) {
+        d.changes.push('美式音标：' + (w.phonetic_us || '') + ' → ' + fix.phonetic_us);
+        w.phonetic_us = String(fix.phonetic_us).trim();
+      }
+      if (fix.phonetic_uk) {
+        d.changes.push('英式音标：' + (w.phonetic_uk || '') + ' → ' + fix.phonetic_uk);
+        w.phonetic_uk = String(fix.phonetic_uk).trim();
+      }
+      if (fix.pos) {
+        d.changes.push('词性：' + (w.pos || '') + ' → ' + fix.pos);
+        w.pos = String(fix.pos).trim();
+      }
+      if (Array.isArray(fix.meanings)) {
+        var m2 = fix.meanings.map(function (m) { return String(m).trim(); }).filter(Boolean);
+        d.changes.push('释义：' + (w.meanings || []).join('；') + ' → ' + m2.join('；'));
+        w.meanings = m2;
+      }
+      if (fix.example_en) w.example_en = String(fix.example_en).trim();
+      if (fix.example_zh) w.example_zh = String(fix.example_zh).trim();
+      w.aiIssue = (r.issues || []).join('；') || '存在疑点，已自动修正';
+      fixed.push(d);
+    });
+    return fixed;
+  }
+
+
+  // 展示 AI 复审修正报告
+  function renderAIReviewReport(fixed) {
+    var body = document.getElementById('aiReviewReportBody');
+    document.getElementById('aiReviewModalTitle').innerHTML = '<i class="ph ph-robot" style="color: var(--c-green);"></i> AI 复审结果';
+    document.getElementById('aiReviewItemPane').classList.add('hidden');
+    document.getElementById('aiReviewReportPane').classList.remove('hidden');
+    if (!fixed.length) {
+      body.innerHTML = '<div style="color: var(--c-green); padding: 12px 0;"><i class="ph ph-check-circle"></i> AI 复核了全部 ' + aiReviewResult.length + ' 个单词，拼写与中文释义均正确，未发现需要修正的内容。</div>';
+      return;
+    }
+    body.innerHTML = '<div style="margin-bottom: 8px;">AI 共发现并<strong style="color: var(--c-red);">自动修正</strong>了 <strong style="color: var(--c-red);">' + fixed.length + '</strong> 处问题（对应表格已标红，请继续人工复审确认）：</div>' +
+      fixed.map(function (d) {
+        return '<div class="card" style="padding: 10px; margin-bottom: 8px; border-left: 3px solid var(--c-red);">' +
+          '<div><strong>' + escapeHtml(d.word) + '</strong></div>' +
+          '<div class="text-sm" style="margin-top: 4px;">' + (d.issues || []).map(function (x) { return '<span class="ai-issue-chip">' + escapeHtml(x) + '</span>'; }).join(' ') + '</div>' +
+          '<div class="text-sm" style="margin-top: 4px; color: var(--c-text-3);">已修正：' + d.changes.map(function (x) { return escapeHtml(x); }).join('；') + '</div>' +
+        '</div>';
+      }).join('');
+  }
+
+  // ---- 人工复审：逐条核对所有单词 ----
+  function markHumanReview() {
+    if (aiWords.length === 0) { showToast('没有可复审的单词', 'error'); return; }
+    aiReviewQueue = aiWords.map(function (_, i) { return i; });
+    aiReviewCurrent = 0;
+    document.getElementById('aiReviewModalTitle').innerHTML = '<i class="ph ph-user-check" style="color: var(--c-green);"></i> 人工复审';
+    document.getElementById('aiReviewTypeHint').textContent = '逐条核对，可编辑修正或删除';
+    document.getElementById('aiReviewItemPane').classList.remove('hidden');
+    document.getElementById('aiReviewReportPane').classList.add('hidden');
+    openAIReviewModal();
+    renderAIReviewItem();
+  }
+
+  // ---- 随机抽审：随机抽取部分单词快速核对 ----
+  function startRandomReview() {
+    if (aiWords.length === 0) { showToast('没有可复审的单词', 'error'); return; }
+    var n = Math.max(3, Math.min(5, Math.ceil(aiWords.length * 0.2)));
+    if (n > aiWords.length) n = aiWords.length;
+    var idxs = [];
+    while (idxs.length < n) {
+      var r = Math.floor(Math.random() * aiWords.length);
+      if (idxs.indexOf(r) === -1) idxs.push(r);
+    }
+    aiReviewQueue = idxs;
+    aiReviewCurrent = 0;
+    document.getElementById('aiReviewModalTitle').innerHTML = '<i class="ph ph-shuffle" style="color: var(--c-green);"></i> 随机抽审';
+    document.getElementById('aiReviewTypeHint').textContent = '随机抽查 ' + n + ' 个单词（' + aiWords.length + ' 个中的 ' + Math.round(n / aiWords.length * 100) + '%），全部确认即完成';
+    document.getElementById('aiReviewItemPane').classList.remove('hidden');
+    document.getElementById('aiReviewReportPane').classList.add('hidden');
+    openAIReviewModal();
+    renderAIReviewItem();
+  }
+
+  // ---- 核对弹窗公共逻辑 ----
+  var aiReviewQueue = [];   // 当前核对队列（aiWords 下标）
+  var aiReviewCurrent = 0;  // 队列当前位置
+  var aiReviewResult = [];  // AI 复审结果
+
+  function openAIReviewModal() {
+    document.getElementById('aiReviewModal').classList.remove('hidden');
+  }
+  function closeAIReviewModal() {
+    document.getElementById('aiReviewModal').classList.add('hidden');
+  }
+
+  function renderAIReviewItem() {
+    if (aiReviewCurrent >= aiReviewQueue.length) {
+      // 核对完成
+      if (document.getElementById('aiReviewModalTitle').textContent.indexOf('随机抽审') !== -1) {
+        aiReviewState.sample = true;
+        showToast('随机抽审完成，共核对 ' + aiReviewQueue.length + ' 个单词', 'success');
+      } else {
+        aiReviewState.human = true;
+        showToast('人工复审完成，共核对 ' + aiReviewQueue.length + ' 个单词', 'success');
+      }
+      renderAIResults();
+      renderAIReviewStatus();
+      closeAIReviewModal();
+      return;
+    }
+    var idx = aiReviewQueue[aiReviewCurrent];
+    var w = aiWords[idx];
+    if (!w) { aiReviewCurrent++; renderAIReviewItem(); return; }
+    document.getElementById('aiReviewProgress').textContent = '第 ' + (aiReviewCurrent + 1) + ' / ' + aiReviewQueue.length + ' 个';
+    var box = document.getElementById('aiReviewItemBox');
+    box.innerHTML =
+      '<div class="form-group"><label class="form-label">单词</label>' +
+      '<input id="airWord" class="form-input" value="' + escapeHtml(w.word || '') + '"></div>' +
+      '<div class="grid grid-2"><div class="form-group"><label class="form-label">音标</label>' +
+      '<input id="airPhonetic" class="form-input" value="' + escapeHtml(w.phonetic_us || '') + '" placeholder="美式音标"></div>' +
+      '<div class="form-group"><label class="form-label">词性</label>' +
+      '<input id="airPos" class="form-input" value="' + escapeHtml(w.pos || '') + '" placeholder="v./n./adj."></div></div>' +
+      '<div class="form-group"><label class="form-label">中文释义（用 ; 分隔）</label>' +
+      '<textarea id="airMeanings" class="form-input" rows="3">' + escapeHtml((w.meanings || []).join('; ')) + '</textarea></div>';
+  }
+
+  function aiReviewSaveAndNext(saveModify) {
+    var idx = aiReviewQueue[aiReviewCurrent];
+    var w = aiWords[idx];
+    if (w) {
+      var word = document.getElementById('airWord').value.trim();
+      var meanings = document.getElementById('airMeanings').value.split(/[;；]/).map(function (s) { return s.trim(); }).filter(Boolean);
+      var phonetic = document.getElementById('airPhonetic').value.trim();
+      var pos = document.getElementById('airPos').value.trim();
+      var changed = word !== (w.word || '') || phonetic !== (w.phonetic_us || '') || pos !== (w.pos || '') ||
+        meanings.join('|') !== (w.meanings || []).join('|');
+      if (word) w.word = word;
+      w.phonetic_us = phonetic;
+      w.pos = pos;
+      w.meanings = meanings;
+      if (saveModify || changed) {
+        w.humanChecked = true;
+      }
+    }
+    aiReviewCurrent++;
+    renderAIReviewItem();
+  }
+
+  function aiReviewDeleteCurrent() {
+    var idx = aiReviewQueue[aiReviewCurrent];
+    var del = aiWords[idx];
+    if (del) {
+      // 从 aiWords 中删除，并修正队列中大于 idx 的下标
+      aiWords.splice(idx, 1);
+      aiReviewQueue = aiReviewQueue.map(function (q) { return q > idx ? q - 1 : q; });
+      aiReviewQueue.splice(aiReviewCurrent, 1);
+    }
+    renderAIReviewItem();
+  }
+
+  // ==================== 导入 ====================
+
+  // 新建单元字段显示/隐藏
+  function toggleNewUnitFields(prefix) {
+    var fields = document.getElementById(prefix + 'NewUnitFields');
+    fields.classList.toggle('hidden', document.getElementById(prefix + 'Unit').value !== 'new');
+  }
+
+  // 解析单元选择：普通单元返回编号，新建单元返回输入框中的编号+名称
+  function resolveUnitSelection(prefix) {
+    var sel = document.getElementById(prefix + 'Unit');
+    if (sel.value === 'new') {
+      return {
+        number: parseInt(document.getElementById(prefix + 'NewUnitNumber').value) || 99,
+        name: document.getElementById(prefix + 'NewUnitName').value.trim() || '',
+      };
+    }
+    return { number: parseInt(sel.value) || null, name: '' };
+  }
+
+  async function aiImportConfirm() {
+    var selected = aiWords.filter(function (w) { return w.checked; });
+    if (selected.length === 0) return;
+    var unit = resolveUnitSelection('ai');
+    var unitNumber = unit.number || 99;
+    var category = document.getElementById('aiCategory').value;
+
+    var btn = document.getElementById('aiImportBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i> 导入中…';
+    appendAILog('开始导入：共 ' + selected.length + ' 个单词 → 单元「' + (unit.name || unitNumber) + '」…');
+    setAIProgress(0, 1, '正在导入…');
+
+    try {
+      var res = await VOCAB_API.post('/api/word/bulk-import/', {
+        words: selected.map(function (w) {
+          return {
+            word: w.word,
+            phonetic_us: w.phonetic_us,
+            phonetic_uk: w.phonetic_uk,
+            pos: w.pos,
+            meanings: w.meanings,
+            example_en: w.example_en,
+            example_zh: w.example_zh,
+            category: category,
+          };
+        }),
+        unit_number: unitNumber,
+        category: category,
+        unit_name: unit.name,
+      });
+      if (res.success) {
+        appendAILog('导入完成：成功 ' + res.imported + ' 个' + (res.skipped ? '，跳过重复 ' + res.skipped + ' 个' : ''), 'c-green');
+        showToast('成功导入 ' + res.imported + ' 个单词' + (res.skipped ? '（跳过重复 ' + res.skipped + ' 个）' : ''), 'success');
+        // 导入完成后回到词库页面并定位到该单元
+        var url = "{% url 'words:word_list' %}";
+        if (unitNumber) url += '?unit=' + unitNumber;
+        setTimeout(function () { window.location.href = url; }, 800);
+      } else {
+        appendAILog('导入失败：' + (res.error || '未知错误'), 'c-red');
+        showToast(res.error || '导入失败', 'error');
+      }
+    } catch (e) {
+      appendAILog('导入出错：' + (e.error || e.message || '请求失败'), 'c-red');
+      showToast('导入失败', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ph ph-check"></i> 导入选中';
+    }
+  }
+
+  // ESC 关闭弹窗
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      if (!document.getElementById('addModelModal').classList.contains('hidden')) closeAddModel();
+      else if (!document.getElementById('modelManagerModal').classList.contains('hidden')) closeModelManager();
+      else if (!document.getElementById('aiReviewModal').classList.contains('hidden')) closeAIReviewModal();
+    }
+  });
+</script>
+{% endblock %}

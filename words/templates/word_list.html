@@ -1,0 +1,845 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}词库浏览 - 考研单词背诵系统{% endblock %}
+{% block page_title %}词库浏览{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<div class="flex gap-4" style="align-items: flex-start; flex-wrap: wrap;">
+  <!-- Left sidebar: units -->
+  <aside style="flex: 1 1 260px; max-width: 320px; min-width: 260px;">
+    <div class="card">
+      <div class="flex justify-between items-center" style="margin-bottom: 12px;">
+        <div class="card-header" style="margin: 0;">单元列表</div>
+        <div class="flex gap-1">
+          <button class="btn btn-primary btn-sm" onclick="location.href='{% url 'words:ai_import' %}'" title="AI 智能导入单词"><i class="ph ph-sparkle"></i></button>
+          <button class="btn btn-primary btn-sm" onclick="showCreateUnit()">+ 新建</button>
+        </div>
+      </div>
+      <div class="flex flex-col gap-2" id="unit-list">
+        {% for unit in units %}
+        <div class="unit-item card" data-unit="{{ unit.number }}" style="padding: 12px; cursor: pointer; position: relative;">
+          <div class="flex justify-between items-center" style="margin-bottom: 8px;">
+            <strong>{{ unit.name }}</strong>
+            <div class="flex items-center gap-1">
+              <span class="text-secondary text-sm">{{ unit.mastered }} / {{ unit.word_count }}</span>
+              <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); location.href='{% url 'words:ai_import' %}?unit={{ unit.number }}'" title="AI 导入到此单元" style="padding: 2px 4px; font-size: 0.7rem;"><i class="ph ph-sparkle"></i></button>
+              <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); showEditUnit({{ unit.number }}, '{{ unit.name }}', '{{ unit.category }}')" title="编辑单元" style="padding: 2px 4px; font-size: 0.7rem;">✎</button>
+              <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); deleteUnit({{ unit.number }}, '{{ unit.name }}')" title="删除单元" style="padding: 2px 4px; font-size: 0.7rem;">✕</button>
+            </div>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-bar-fill" style="width: {% if unit.word_count > 0 %}{% widthratio unit.mastered unit.word_count 100 %}{% else %}0{% endif %}%;"></div>
+          </div>
+        </div>
+        {% empty %}
+        <div class="text-secondary text-sm">暂无单元数据</div>
+        {% endfor %}
+      </div>
+
+      <!-- Create unit form -->
+      <div id="createUnitForm" class="hidden" style="margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+        <div class="form-group">
+          <label class="form-label">单元编号</label>
+          <input type="number" class="form-input" id="newUnitNumber" placeholder="如 5" min="1">
+        </div>
+        <div class="form-group">
+          <label class="form-label">单元名称</label>
+          <input type="text" class="form-input" id="newUnitName" placeholder="如 List 5">
+        </div>
+        <div class="form-group">
+          <label class="form-label">词汇类别</label>
+          <select class="form-input" id="newUnitCategory">
+            <option value="required">必考词</option>
+            <option value="basic">基础词</option>
+            <option value="advanced">超纲词</option>
+          </select>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-primary btn-sm" onclick="createUnit()">创建</button>
+          <button class="btn btn-secondary btn-sm" onclick="hideCreateUnit()">取消</button>
+        </div>
+      </div>
+
+      <!-- Edit unit form -->
+      <div id="editUnitForm" class="hidden" style="margin-top: 12px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius-sm);">
+        <div class="text-sm text-secondary" style="margin-bottom: 8px;">编辑单元 <strong id="editUnitNumber"></strong></div>
+        <div class="form-group">
+          <label class="form-label">单元名称</label>
+          <input type="text" class="form-input" id="editUnitName">
+        </div>
+        <div class="form-group">
+          <label class="form-label">词汇类别</label>
+          <select class="form-input" id="editUnitCategory">
+            <option value="required">必考词</option>
+            <option value="basic">基础词</option>
+            <option value="advanced">超纲词</option>
+          </select>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-primary btn-sm" onclick="updateUnit()">保存</button>
+          <button class="btn btn-secondary btn-sm" onclick="hideEditUnit()">取消</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main word list area -->
+  <div style="flex: 2 1 0; min-width: 0;">
+    <!-- Filters -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="flex gap-4 items-center" style="flex-wrap: wrap;">
+        <input type="text" id="searchInput" class="form-input" placeholder="搜索单词或释义" style="flex: 1; min-width: 200px;">
+        <select id="categoryFilter" class="form-input" style="width: 140px;">
+          <option value="">全部分类</option>
+          <option value="required">必考词</option>
+          <option value="basic">基础词</option>
+          <option value="advanced">超纲词</option>
+        </select>
+        <select id="unitFilter" class="form-input" style="width: 160px;">
+          <option value="">全部单元</option>
+          {% for unit in units %}
+          <option value="{{ unit.number }}">{{ unit.name }}</option>
+          {% endfor %}
+        </select>
+        <select id="statusFilter" class="form-input" style="width: 140px;">
+          <option value="">全部状态</option>
+          <option value="mastered">会</option>
+          <option value="unknown">不会</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Add word bar -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="flex items-center justify-between" style="flex-wrap: wrap; gap: 8px;">
+        <span class="text-sm text-secondary">添加新单词，或点击表格中的 ✎ 编辑任意单词的完整信息</span>
+        <div class="flex gap-2">
+          <button class="btn btn-primary btn-sm" onclick="location.href='{% url 'words:ai_import' %}'"><i class="ph ph-sparkle"></i> AI 导入</button>
+          <button class="btn btn-primary btn-sm" onclick="openWordModal('add')"><i class="ph ph-plus"></i> 添加单词</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export bar -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="flex items-center gap-3" style="flex-wrap: wrap;">
+        <span class="text-sm text-secondary" style="white-space: nowrap;">导出PDF：</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportPDF('all')">全部单词</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportPDF('unit')">当前单元</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportPDF('filtered')">当前筛选结果</button>
+        <span class="text-secondary" style="margin: 0 4px;">|</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportPDF('favorites')">收藏单词</button>
+        <button class="btn btn-danger btn-sm" onclick="exportPDF('errors')">易错词</button>
+      </div>
+    </div>
+
+    <!-- Word table -->
+    <div class="card">
+      <div class="card-header">单词列表</div>
+      <div style="overflow-x: auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>序号</th>
+              <th>单词</th>
+              <th>音标</th>
+              <th>词性</th>
+              <th>释义</th>
+              <th>掌握状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="wordTableBody">
+            <tr>
+              <td colspan="7" class="text-center text-secondary">加载中...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="pagination" class="flex justify-center gap-4 items-center mt-4"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Word Add/Edit Modal ===== -->
+<div id="wordModal" class="modal-overlay hidden" onclick="if (event.target === this) closeWordModal()">
+  <div class="modal" style="max-width: 560px;">
+    <div class="flex justify-between items-center" style="margin-bottom: 16px;">
+      <h3 id="wordModalTitle" style="margin: 0; font-size: var(--fs-lg);">添加单词</h3>
+      <button class="btn btn-ghost" onclick="closeWordModal()" title="关闭"><i class="ph ph-x"></i></button>
+    </div>
+
+    <input type="hidden" id="wmId">
+
+    <div class="form-group">
+      <label class="form-label">单词 <span class="text-red">*</span></label>
+      <input type="text" id="wmWord" class="form-input" placeholder="如: generate">
+    </div>
+
+    <div class="grid grid-2">
+      <div class="form-group">
+        <label class="form-label">美式音标</label>
+        <input type="text" id="wmPhoneticUs" class="form-input" placeholder="如: /ˈdʒenəreɪt/">
+      </div>
+      <div class="form-group">
+        <label class="form-label">英式音标</label>
+        <input type="text" id="wmPhoneticUk" class="form-input" placeholder="如: /ˈdʒenəreɪt/">
+      </div>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="form-group">
+        <label class="form-label">词性</label>
+        <input type="text" id="wmPos" class="form-input" placeholder="如: v. / n. / adj.">
+      </div>
+      <div class="form-group">
+        <label class="form-label">词汇类别</label>
+        <select id="wmCategory" class="form-input">
+          <option value="required">必考词</option>
+          <option value="basic">基础词</option>
+          <option value="advanced">超纲词</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">释义（每行一条）<span class="text-red">*</span></label>
+      <textarea id="wmMeanings" class="form-input" placeholder="v. 产生，生成&#10;n. 产生；生成" rows="3"></textarea>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">熟词僻义（可选，每行一条）</label>
+      <textarea id="wmUncommon" class="form-input" placeholder="平时常见的词在不同语境下的特殊含义" rows="2"></textarea>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">搭配（可选，每行一条）</label>
+      <textarea id="wmCollocations" class="form-input" placeholder="如: generate electricity 发电" rows="2"></textarea>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="form-group">
+        <label class="form-label">英文例句</label>
+        <textarea id="wmExampleEn" class="form-input" rows="2"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">中文翻译</label>
+        <textarea id="wmExampleZh" class="form-input" rows="2"></textarea>
+      </div>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="form-group">
+        <label class="form-label">所属单元</label>
+        <select id="wmUnit" class="form-input" onchange="toggleNewUnitFields('wm')">
+          {% for unit in units %}
+          <option value="{{ unit.number }}">{{ unit.name }}</option>
+          {% endfor %}
+          <option value="new">➕ 新建单元…</option>
+        </select>
+        <div id="wmNewUnitFields" class="hidden grid grid-2" style="margin-top: 8px; gap: 8px;">
+          <input type="number" id="wmNewUnitNumber" class="form-input" placeholder="新单元编号" min="1">
+          <input type="text" id="wmNewUnitName" class="form-input" placeholder="单元名称（如 List 6）">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">单元内序号</label>
+        <input type="number" id="wmListNumber" class="form-input" value="1" min="1">
+      </div>
+    </div>
+
+    <div class="flex gap-2 justify-end" style="margin-top: 8px;">
+      <button class="btn btn-secondary" onclick="closeWordModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitWordModal()"><i class="ph ph-check"></i> 保存</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  var wordDetailUrlTemplate = "{% url 'words:word_detail' 0 %}".replace('/0/', '/__ID__/');
+  var favoriteUrlTemplate = "{% url 'words:api_favorite' 0 %}".replace('/0/', '/__ID__/');
+  var perPage = 50;
+  var currentPage = 1;
+  var searchDebounceTimer = null;
+
+  function getStatusLabel(status) {
+    var map = { 'new': '不会', 'learning': '不会', 'reviewing': '不会', 'mastered': '会' };
+    return map[status] || status;
+  }
+
+  function escapeHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function getStatusBadgeClass(status) {
+    var map = {
+      'mastered': 'badge-mastered'
+    };
+    return map[status] || 'badge-new';
+  }
+
+  function buildQuery(page) {
+    var params = new URLSearchParams();
+    var search = document.getElementById('searchInput').value.trim();
+    var category = document.getElementById('categoryFilter').value;
+    var unit = document.getElementById('unitFilter').value;
+    var status = document.getElementById('statusFilter').value;
+    if (search) params.set('search', search);
+    if (category) params.set('category', category);
+    if (unit) params.set('unit', unit);
+    if (status) params.set('status', status);
+    params.set('page', page || 1);
+    params.set('per_page', perPage);
+    return '/api/words/?' + params.toString();
+  }
+
+  // ===== 状态持久化：刷新后保留筛选条件与页码 =====
+  function saveWordListState() {
+    var state = {
+      search: document.getElementById('searchInput').value.trim(),
+      category: document.getElementById('categoryFilter').value,
+      unit: document.getElementById('unitFilter').value,
+      status: document.getElementById('statusFilter').value,
+      page: currentPage
+    };
+    sessionStorage.setItem('vocab-wordlist', JSON.stringify(state));
+  }
+
+  function restoreWordListState() {
+    try {
+      var s = JSON.parse(sessionStorage.getItem('vocab-wordlist') || 'null');
+      if (!s) return;
+      if (s.search) document.getElementById('searchInput').value = s.search;
+      if (s.category) document.getElementById('categoryFilter').value = s.category;
+      if (s.unit) document.getElementById('unitFilter').value = s.unit;
+      if (s.status) document.getElementById('statusFilter').value = s.status;
+      if (s.page) currentPage = s.page;
+    } catch (e) {}
+  }
+
+  async function loadWords(page) {
+    currentPage = page || 1;
+    saveWordListState();
+    try {
+      var data = await VOCAB_API.get(buildQuery(currentPage));
+      renderWords(data);
+      renderPagination(data.total, data.page);
+    } catch (e) {
+      showToast('加载单词失败', 'error');
+    }
+  }
+
+  function renderWords(data) {
+    var tbody = document.getElementById('wordTableBody');
+    tbody.innerHTML = '';
+    var words = data.words || [];
+    if (words.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-secondary">暂无单词</td></tr>';
+      return;
+    }
+    var startIndex = (data.page - 1) * perPage + 1;
+    words.forEach(function (w, i) {
+      var meanings = (w.meanings || []).join('; ');
+      var phonetic = w.phonetic_us || w.phonetic_uk || '-';
+      var detailUrl = wordDetailUrlTemplate.replace('__ID__', w.id);
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + (startIndex + i) + '</td>' +
+        '<td><a href="' + detailUrl + '">' + w.word + '</a></td>' +
+        '<td>' + phonetic + '</td>' +
+        '<td>' + (w.pos || '-') + '</td>' +
+        '<td>' + meanings + '</td>' +
+        '<td><span class="badge ' + getStatusBadgeClass(w.status) + '">' + getStatusLabel(w.status) + '</span></td>' +
+        '<td style="white-space: nowrap;">' +
+          '<a href="' + detailUrl + '" class="btn btn-sm btn-secondary">详</a>' +
+          '<button class="btn btn-sm ' + (w.status === 'mastered' ? 'btn-primary' : 'btn-secondary') + '" onclick="toggleWordMastery(' + w.id + ', this)" style="margin-left: 4px;">' +
+            (w.status === 'mastered' ? '✅' : '❌') +
+          '</button>' +
+          '<button class="btn btn-sm btn-secondary" onclick="openWordModal(\'edit\', ' + w.id + ')" style="margin-left: 4px;">✎</button>' +
+          '<button class="btn btn-sm btn-secondary favorite-btn" data-id="' + w.id + '" onclick="toggleFavorite(' + w.id + ', this)" style="margin-left: 4px;">' +
+            (w.is_favorite ? '★' : '☆') +
+          '</button>' +
+          '<button class="btn btn-sm btn-danger" onclick="deleteWord(' + w.id + ', \'' + escapeHtml(w.word) + '\')" style="margin-left: 4px;">✕</button>' +
+        '</td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderPagination(total, page) {
+    var totalPages = Math.ceil(total / perPage) || 1;
+    var container = document.getElementById('pagination');
+    container.innerHTML = '';
+
+    // First & Prev
+    var first = document.createElement('button');
+    first.className = 'btn btn-secondary btn-sm';
+    first.textContent = '首页';
+    first.disabled = page <= 1;
+    first.onclick = function () { loadWords(1); };
+    container.appendChild(first);
+
+    var prev = document.createElement('button');
+    prev.className = 'btn btn-secondary btn-sm';
+    prev.textContent = '‹';
+    prev.disabled = page <= 1;
+    prev.onclick = function () { if (page > 1) loadWords(page - 1); };
+    container.appendChild(prev);
+
+    // Page buttons
+    var startPage = Math.max(1, page - 2);
+    var endPage = Math.min(totalPages, page + 2);
+
+    if (startPage > 1) {
+      var dot = document.createElement('span'); dot.className = 'text-secondary text-sm'; dot.textContent = '…';
+      container.appendChild(dot);
+    }
+    for (var p = startPage; p <= endPage; p++) {
+      var pb = document.createElement('button');
+      pb.className = 'btn btn-sm ' + (p === page ? 'btn-primary' : 'btn-secondary');
+      pb.textContent = p;
+      pb.onclick = (function (pn) { return function () { loadWords(pn); }; })(p);
+      container.appendChild(pb);
+    }
+    if (endPage < totalPages) {
+      var dot2 = document.createElement('span'); dot2.className = 'text-secondary text-sm'; dot2.textContent = '…';
+      container.appendChild(dot2);
+    }
+
+    // Next & Last
+    var next = document.createElement('button');
+    next.className = 'btn btn-secondary btn-sm';
+    next.textContent = '›';
+    next.disabled = page >= totalPages;
+    next.onclick = function () { if (page < totalPages) loadWords(page + 1); };
+    container.appendChild(next);
+
+    var last = document.createElement('button');
+    last.className = 'btn btn-secondary btn-sm';
+    last.textContent = '末页';
+    last.disabled = page >= totalPages;
+    last.onclick = function () { loadWords(totalPages); };
+    container.appendChild(last);
+
+    // Info text
+    var info = document.createElement('span');
+    info.className = 'text-secondary text-sm';
+    info.textContent = '共 ' + total + ' 条';
+    container.appendChild(info);
+
+    // Per-page selector
+    var select = document.createElement('select');
+    select.className = 'form-input';
+    select.style.width = '80px';
+    [20, 50, 100].forEach(function (n) {
+      var opt = document.createElement('option');
+      opt.value = n;
+      opt.textContent = n + '条/页';
+      if (n === perPage) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.onchange = function () {
+      perPage = parseInt(this.value);
+      localStorage.setItem('vocab-pp', perPage);
+      loadWords(1);
+    };
+    container.appendChild(select);
+  }
+
+  function updateFilters() {
+    loadWords(1);
+  }
+
+  // Search debounce: auto-search after typing stops for 350ms
+  document.getElementById('searchInput').addEventListener('input', function () {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(function () { loadWords(1); }, 350);
+  });
+
+  // Search on Enter key
+  document.getElementById('searchInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      clearTimeout(searchDebounceTimer);
+      loadWords(1);
+    }
+  });
+
+  // Auto-search on filter changes
+  ['categoryFilter', 'unitFilter', 'statusFilter'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', function () { loadWords(1); });
+  });
+
+  var toggleMasteryUrlTemplate = "/api/toggle/__ID__/";
+
+  async function toggleWordMastery(wordId, btn) {
+    try {
+      var res = await VOCAB_API.post(toggleMasteryUrlTemplate.replace('__ID__', wordId));
+      if (res.success) {
+        if (res.is_mastered) {
+          btn.className = 'btn btn-sm btn-primary';
+          btn.innerHTML = '✅';
+          showToast('已标记为"会"', 'success');
+        } else {
+          btn.className = 'btn btn-sm btn-secondary';
+          btn.innerHTML = '❌';
+          showToast('已标记为"不会"', 'success');
+        }
+        // Reload to update the badge
+        loadWords(currentPage);
+      } else {
+        showToast(res.error || '操作失败', 'error');
+      }
+    } catch (e) {
+      showToast('请求失败', 'error');
+    }
+  }
+
+  async function toggleFavorite(wordId, btn) {
+    try {
+      var res = await VOCAB_API.post(favoriteUrlTemplate.replace('__ID__', wordId));
+      if (res.success) {
+        btn.textContent = res.is_favorite ? '★' : '☆';
+        showToast(res.is_favorite ? '已收藏' : '已取消收藏', 'success');
+      } else {
+        showToast(res.error || '操作失败', 'error');
+      }
+    } catch (e) {
+      showToast('收藏操作失败', 'error');
+    }
+  }
+
+  // ===== Add/Edit Word Modal =====
+  function splitLines(text) {
+    return String(text || '').split(/\n|;|；/).map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+
+  function openWordModal(mode, wordId) {
+    var modal = document.getElementById('wordModal');
+    var title = document.getElementById('wordModalTitle');
+    modal.classList.remove('hidden');
+
+    if (mode === 'edit') {
+      title.textContent = '编辑单词';
+      document.getElementById('wmId').value = wordId;
+      document.getElementById('wmWord').value = '';
+      // 从已加载的数据中查找，找不到则请求详情
+      var row = null;
+      try { row = JSON.parse(sessionStorage.getItem('vocab-edit-' + wordId) || 'null'); } catch (e) {}
+      fillWordModal(row || {});
+      if (!row) {
+        VOCAB_API.get('/api/words/' + wordId + '/').then(function (d) {
+          fillWordModal(d);
+          sessionStorage.setItem('vocab-edit-' + wordId, JSON.stringify(d));
+        }).catch(function () { showToast('加载单词详情失败', 'error'); });
+      }
+    } else {
+      title.textContent = '添加单词';
+      document.getElementById('wmId').value = '';
+      // 重置单元选择
+      var unitSel = document.getElementById('wmUnit');
+      if (unitSel.options.length > 0) unitSel.selectedIndex = 0;
+      document.getElementById('wmNewUnitFields').classList.add('hidden');
+      fillWordModal({});
+    }
+  }
+
+  function fillWordModal(d) {
+    document.getElementById('wmWord').value = d.word || '';
+    document.getElementById('wmPhoneticUs').value = d.phonetic_us || '';
+    document.getElementById('wmPhoneticUk').value = d.phonetic_uk || '';
+    document.getElementById('wmPos').value = d.pos || '';
+    document.getElementById('wmCategory').value = d.category || 'required';
+    document.getElementById('wmMeanings').value = (d.meanings || []).join('\n');
+    document.getElementById('wmUncommon').value = (d.uncommon_meanings || []).join('\n');
+    document.getElementById('wmCollocations').value = (d.collocations || []).join('\n');
+    document.getElementById('wmExampleEn').value = d.example_en || '';
+    document.getElementById('wmExampleZh').value = d.example_zh || '';
+    var unitSel = document.getElementById('wmUnit');
+    if (d.unit_number && Array.prototype.some.call(unitSel.options, function (o) { return o.value == d.unit_number; })) {
+      unitSel.value = d.unit_number;
+    } else if (d.unit_number) {
+      var opt = document.createElement('option');
+      opt.value = d.unit_number;
+      opt.textContent = 'Unit ' + d.unit_number + (d.unit_name ? ' - ' + d.unit_name : '');
+      unitSel.appendChild(opt);
+      unitSel.value = d.unit_number;
+    }
+    document.getElementById('wmNewUnitFields').classList.add('hidden');
+    document.getElementById('wmListNumber').value = d.list_number || 1;
+  }
+
+  function closeWordModal() {
+    document.getElementById('wordModal').classList.add('hidden');
+  }
+
+  // 新建单元字段显示/隐藏（prefix: wm / ai）
+  function toggleNewUnitFields(prefix) {
+    var fields = document.getElementById(prefix + 'NewUnitFields');
+    fields.classList.toggle('hidden', document.getElementById(prefix + 'Unit').value !== 'new');
+  }
+
+  // 解析单元选择：普通单元返回编号，新建单元返回输入框中的编号+名称
+  function resolveUnitSelection(prefix) {
+    var sel = document.getElementById(prefix + 'Unit');
+    if (sel.value === 'new') {
+      return {
+        number: parseInt(document.getElementById(prefix + 'NewUnitNumber').value) || 99,
+        name: document.getElementById(prefix + 'NewUnitName').value.trim() || '',
+      };
+    }
+    return { number: parseInt(sel.value) || null, name: '' };
+  }
+
+  async function submitWordModal() {
+    var id = document.getElementById('wmId').value;
+    var word = document.getElementById('wmWord').value.trim();
+    if (!word) { showToast('请输入单词', 'error'); return; }
+
+    var data = {
+      word: word,
+      phonetic_us: document.getElementById('wmPhoneticUs').value.trim(),
+      phonetic_uk: document.getElementById('wmPhoneticUk').value.trim(),
+      pos: document.getElementById('wmPos').value.trim(),
+      meanings: splitLines(document.getElementById('wmMeanings').value),
+      uncommon_meanings: splitLines(document.getElementById('wmUncommon').value),
+      collocations: splitLines(document.getElementById('wmCollocations').value),
+      example_en: document.getElementById('wmExampleEn').value.trim(),
+      example_zh: document.getElementById('wmExampleZh').value.trim(),
+      category: document.getElementById('wmCategory').value,
+      unit_number: resolveUnitSelection('wm').number,
+      unit_name: resolveUnitSelection('wm').name,
+      list_number: parseInt(document.getElementById('wmListNumber').value) || 1,
+    };
+
+    if (!data.meanings.length) { showToast('请输入至少一条释义', 'error'); return; }
+
+    try {
+      var url = id ? '/api/word/update/' + id + '/' : '/api/word/create/';
+      var res = await VOCAB_API.post(url, data);
+      if (res.success) {
+        showToast(id ? '单词已更新' : '添加成功', 'success');
+        if (id) sessionStorage.removeItem('vocab-edit-' + id);
+        closeWordModal();
+        loadWords(currentPage);
+        loadUnits();
+      } else {
+        showToast(res.error || '保存失败', 'error');
+      }
+    } catch (e) {
+      showToast('请求失败', 'error');
+    }
+  }
+
+  // ESC 关闭弹窗
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      if (!document.getElementById('wordModal').classList.contains('hidden')) closeWordModal();
+    }
+  });
+
+  // ===== Delete Word =====
+  async function deleteWord(wordId, wordText) {
+    if (!confirm('确定要删除 "' + wordText + '" 吗？')) return;
+    try {
+      var res = await VOCAB_API.del('/api/word/delete/' + wordId + '/');
+      if (res.success) {
+        showToast(res.message, 'success');
+        loadWords(currentPage);
+      } else {
+        showToast(res.error || '删除失败', 'error');
+      }
+    } catch (e) {
+      showToast('请求失败', 'error');
+    }
+  }
+
+  function debounce(fn, wait) {
+    var timeout;
+    return function () {
+      var args = arguments;
+      clearTimeout(timeout);
+      timeout = setTimeout(function () { fn.apply(null, args); }, wait);
+    };
+  }
+
+  // ===== 刷新单元侧边栏（新建/导入单元后同步） =====
+  function loadUnits() {
+    VOCAB_API.get('/api/units/').then(function (res) {
+      var list = document.getElementById('unit-list');
+      if (!res.units || res.units.length === 0) {
+        list.innerHTML = '<div class="text-secondary text-sm">暂无单元数据</div>';
+        return;
+      }
+      list.innerHTML = res.units.map(function (u) {
+        var pct = Math.min(100, Math.round(u.progress_percent || 0));
+        return '<div class="unit-item card" data-unit="' + u.number + '" style="padding: 12px; cursor: pointer; position: relative;">' +
+          '<div class="flex justify-between items-center" style="margin-bottom: 8px;">' +
+            '<strong>' + escapeHtml(u.name) + '</strong>' +
+            '<div class="flex items-center gap-1">' +
+              '<span class="text-secondary text-sm">' + u.mastered_count + ' / ' + u.word_count + '</span>' +
+              '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); location.href=\'{% url 'words:ai_import' %}?unit=' + u.number + '\'" title="AI 导入到此单元" style="padding: 2px 4px; font-size: 0.7rem;"><i class="ph ph-sparkle"></i></button>' +
+              '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); showEditUnit(' + u.number + ', \'' + escapeHtml(u.name).replace(/'/g, "\\'") + '\', \'' + u.category + '\')" title="编辑单元" style="padding: 2px 4px; font-size: 0.7rem;">✎</button>' +
+              '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); deleteUnit(' + u.number + ', \'' + escapeHtml(u.name).replace(/'/g, "\\'") + '\')" title="删除单元" style="padding: 2px 4px; font-size: 0.7rem;">✕</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="progress-bar"><div class="progress-bar-fill" style="width: ' + pct + '%;"></div></div>' +
+        '</div>';
+      }).join('');
+      bindUnitItems();
+    }).catch(function () {});
+  }
+
+  // 单元项点击 → 按单元过滤
+  function bindUnitItems() {
+    document.querySelectorAll('.unit-item').forEach(function (item) {
+      item.addEventListener('click', function () {
+        var unitNumber = this.getAttribute('data-unit');
+        document.getElementById('unitFilter').value = unitNumber;
+        updateFilters();
+      });
+    });
+  }
+
+  // Unit sidebar clicks
+  bindUnitItems();
+
+  // Initial load: restore perPage & filter state, then fetch fresh data
+  var savedPP = parseInt(localStorage.getItem('vocab-pp'));
+  if (savedPP && [20, 50, 100].indexOf(savedPP) !== -1) { perPage = savedPP; }
+  restoreWordListState();
+  loadWords(currentPage);
+
+  // ===== PDF Export =====
+  function exportPDF(type) {
+    var params = new URLSearchParams();
+    params.set('type', type);
+
+    if (type === 'unit') {
+      var unitVal = document.getElementById('unitFilter').value;
+      if (!unitVal) {
+        showToast('请先在筛选器中选中一个单元', 'error');
+        return;
+      }
+      params.set('unit', unitVal);
+    }
+
+    if (type === 'filtered') {
+      var search = document.getElementById('searchInput').value.trim();
+      var category = document.getElementById('categoryFilter').value;
+      var unit = document.getElementById('unitFilter').value;
+      var status = document.getElementById('statusFilter').value;
+      if (search) params.set('search', search);
+      if (category) params.set('category', category);
+      if (unit) params.set('unit', unit);
+      if (status) params.set('status', status);
+    }
+
+    window.open('/api/export/pdf/?' + params.toString(), '_blank');
+    showToast('正在生成 PDF...', 'success');
+  }
+
+  // ===== Unit CRUD =====
+  function showCreateUnit() {
+    hideEditUnit();
+    document.getElementById('createUnitForm').classList.remove('hidden');
+  }
+
+  function hideCreateUnit() {
+    document.getElementById('createUnitForm').classList.add('hidden');
+    document.getElementById('newUnitNumber').value = '';
+    document.getElementById('newUnitName').value = '';
+  }
+
+  function showEditUnit(number, name, category) {
+    hideCreateUnit();
+    document.getElementById('editUnitNumber').textContent = number;
+    document.getElementById('editUnitName').value = name;
+    document.getElementById('editUnitCategory').value = category;
+    document.getElementById('editUnitForm').dataset.unitNumber = number;
+    document.getElementById('editUnitForm').classList.remove('hidden');
+  }
+
+  function hideEditUnit() {
+    document.getElementById('editUnitForm').classList.add('hidden');
+  }
+
+  async function createUnit() {
+    var number = parseInt(document.getElementById('newUnitNumber').value);
+    var name = document.getElementById('newUnitName').value.trim();
+    var category = document.getElementById('newUnitCategory').value;
+
+    if (!number || !name) {
+      showToast('请填写单元编号和名称', 'error');
+      return;
+    }
+
+    try {
+      var res = await VOCAB_API.post('/api/unit/create/', {
+        number: number,
+        name: name,
+        category: category,
+      });
+      if (res.success) {
+        showToast('单元创建成功', 'success');
+        hideCreateUnit();
+        setTimeout(function () { window.location.reload(); }, 500);
+      } else {
+        showToast(res.error || '创建失败', 'error');
+      }
+    } catch (e) {
+      showToast('请求失败', 'error');
+    }
+  }
+
+  async function updateUnit() {
+    var number = parseInt(document.getElementById('editUnitForm').dataset.unitNumber);
+    var name = document.getElementById('editUnitName').value.trim();
+    var category = document.getElementById('editUnitCategory').value;
+
+    if (!name) {
+      showToast('单元名称不能为空', 'error');
+      return;
+    }
+
+    try {
+      var res = await VOCAB_API.post('/api/unit/update/' + number + '/', {
+        name: name,
+        category: category,
+      });
+      if (res.success) {
+        showToast('单元信息已更新', 'success');
+        hideEditUnit();
+        setTimeout(function () { window.location.reload(); }, 500);
+      } else {
+        showToast(res.error || '更新失败', 'error');
+      }
+    } catch (e) {
+      showToast('请求失败', 'error');
+    }
+  }
+
+  async function deleteUnit(unitNumber, unitName) {
+    if (!confirm('确定要删除"' + unitName + '"吗？\n\n该单元下的所有单词也会被一起删除，此操作不可恢复。')) {
+      return;
+    }
+
+    try {
+      var res = await VOCAB_API.del('/api/unit/delete/' + unitNumber + '/');
+      if (res.success) {
+        showToast(res.message, 'success');
+        setTimeout(function () { window.location.reload(); }, 800);
+      } else {
+        showToast(res.error || '删除失败', 'error');
+      }
+    } catch (e) {
+      showToast('请求失败', 'error');
+    }
+  }
+</script>
+{% endblock %}

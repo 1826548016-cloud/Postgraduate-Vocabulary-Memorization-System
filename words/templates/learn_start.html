@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}选择背诵范围 - 考研单词背诵系统{% endblock %}
+
+{% block page_title %}选择背诵范围{% endblock %}
+
+{% block content %}
+<form id="learnForm" action="{% url 'words:learn_session' %}" method="get">
+  <div class="card mb-4">
+    <div class="card-header">背诵范围</div>
+    <div class="flex flex-col gap-2">
+      <label class="flex items-center gap-2">
+        <input type="radio" name="scope" value="unknown" checked>
+        <span>不会的词 <span class="text-secondary text-sm">（未掌握的全部单词）</span></span>
+      </label>
+      <label class="flex items-center gap-2">
+        <input type="radio" name="scope" value="mastered">
+        <span>会的词 <span class="text-secondary text-sm">（已掌握的单词，用于复习）</span></span>
+      </label>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header">背诵模式</div>
+    <div class="flex flex-col gap-2">
+      <label class="flex items-center gap-2">
+        <input type="radio" name="mode" value="sequential" checked>
+        <span>顺序背诵</span>
+      </label>
+      <label class="flex items-center gap-2">
+        <input type="radio" name="mode" value="random">
+        <span>乱序背诵</span>
+      </label>
+      <label class="flex items-center gap-2">
+        <input type="radio" name="mode" value="mask_en">
+        <span>遮英文回忆中文</span>
+      </label>
+      <label class="flex items-center gap-2">
+        <input type="radio" name="mode" value="mask_zh">
+        <span>遮中文默写英文</span>
+      </label>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="flex justify-between items-center mb-4">
+      <div class="card-header">选择单元</div>
+      <div class="flex gap-2">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="selectAll()">全选</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="invertSelection()">反选</button>
+      </div>
+    </div>
+
+    <div class="card-grid">
+      {% for unit in units %}
+      <label class="card">
+        <div class="flex justify-between items-center mb-2">
+          <div>
+            <div>Unit {{ unit.number }} - {{ unit.name }}</div>
+            <div class="text-sm text-secondary">{{ unit.word_count }} 词</div>
+          </div>
+          <input type="checkbox" name="units" value="{{ unit.number }}" class="unit-checkbox" onchange="updateSelectedCount()">
+        </div>
+        <div class="progress-bar">
+          <div class="progress-bar-fill" style="width: {{ unit.progress_percent }}%"></div>
+        </div>
+        <div class="text-sm text-secondary mt-2">已掌握 {{ unit.mastered_count }} / {{ unit.word_count }}</div>
+      </label>
+      {% endfor %}
+    </div>
+
+    <div class="mt-4 text-secondary">
+      已选择 <span id="selectedCount" class="text-accent">0</span> 个单元，共 <span id="selectedWords" class="text-accent">0</span> 个单词
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary btn-lg w-full">开始背诵</button>
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const unitWordCounts = {
+  {% for unit in units %}
+  "{{ unit.number }}": {{ unit.word_count }}{% if not forloop.last %},{% endif %}
+  {% endfor %}
+};
+
+function selectAll() {
+  document.querySelectorAll('.unit-checkbox').forEach(cb => cb.checked = true);
+  updateSelectedCount();
+}
+
+function invertSelection() {
+  document.querySelectorAll('.unit-checkbox').forEach(cb => cb.checked = !cb.checked);
+  updateSelectedCount();
+}
+
+function updateSelectedCount() {
+  const checked = document.querySelectorAll('.unit-checkbox:checked');
+  let totalWords = 0;
+  checked.forEach(cb => {
+    totalWords += unitWordCounts[cb.value] || 0;
+  });
+  document.getElementById('selectedCount').textContent = checked.length;
+  document.getElementById('selectedWords').textContent = totalWords;
+}
+
+function showToast(message, type) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = 'toast toast-' + type;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 300);
+  }, 2500);
+}
+
+document.getElementById('learnForm').addEventListener('submit', function(e) {
+  const checked = document.querySelectorAll('.unit-checkbox:checked');
+  if (checked.length === 0) {
+    e.preventDefault();
+    showToast('请至少选择一个单元', 'error');
+  }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,524 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}模拟考试 - 考研单词背诵系统{% endblock %}
+
+{% block page_title %}模拟考试{% endblock %}
+
+{% block content %}
+<form style="display:none;">{% csrf_token %}</form>
+
+<!-- ========== 阶段一：考试配置 ========== -->
+<div id="examConfig" class="exam-phase">
+  <div class="card mb-4">
+    <div class="card-header">考试范围</div>
+    <div class="flex flex-col gap-2">
+      <label class="flex items-center gap-2"><input type="radio" name="examScope" value="all" checked><span>全部单词</span></label>
+      <label class="flex items-center gap-2"><input type="radio" name="examScope" value="unknown"><span>不会的词 <span class="text-secondary text-sm">（未掌握）</span></span></label>
+      <label class="flex items-center gap-2"><input type="radio" name="examScope" value="mastered"><span>会的词 <span class="text-secondary text-sm">（已掌握）</span></span></label>
+      <label class="flex items-center gap-2"><input type="radio" name="examScope" value="favorites"><span>收藏的单词</span></label>
+      <label class="flex items-center gap-2"><input type="radio" name="examScope" value="errors"><span>易错词 <span class="text-secondary text-sm">（曾经答错过的）</span></span></label>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header">词汇类别</div>
+    <div class="flex flex-col gap-2">
+      <label class="flex items-center gap-2"><input type="radio" name="examCategory" value="" checked><span>全部类别</span></label>
+      <label class="flex items-center gap-2"><input type="radio" name="examCategory" value="required"><span>必考词</span></label>
+      <label class="flex items-center gap-2"><input type="radio" name="examCategory" value="basic"><span>基础词</span></label>
+      <label class="flex items-center gap-2"><input type="radio" name="examCategory" value="advanced"><span>超纲词</span></label>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header">题型方向</div>
+    <div class="flex flex-col gap-2">
+      <label class="flex items-center gap-2"><input type="radio" name="examDirection" value="en2zh" checked><span>英译中 <span class="text-secondary text-sm">（看单词选中文释义）</span></span></label>
+      <label class="flex items-center gap-2"><input type="radio" name="examDirection" value="zh2en"><span>中译英 <span class="text-secondary text-sm">（看中文释义选单词）</span></span></label>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="flex justify-between items-center mb-4">
+      <div class="card-header">单元范围</div>
+      <div class="flex gap-2">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="examSelectAllUnits()">全选</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="examInvertUnits()">反选</button>
+      </div>
+    </div>
+    <div class="flex flex-col gap-2 mb-4">
+      <label class="flex items-center gap-2"><input type="radio" name="examUnitMode" value="all" checked onchange="onExamUnitMode()"><span>全部单元</span></label>
+      <label class="flex items-center gap-2"><input type="radio" name="examUnitMode" value="select" onchange="onExamUnitMode()"><span>指定单元</span></label>
+    </div>
+    <div id="examUnitGrid" class="card-grid hidden">
+      {% for unit in units %}
+      <label class="card">
+        <div class="flex justify-between items-center mb-2">
+          <div>
+            <div>Unit {{ unit.number }} - {{ unit.name }}</div>
+            <div class="text-sm text-secondary">{{ unit.word_count }} 词</div>
+          </div>
+          <input type="checkbox" name="examUnits" value="{{ unit.number }}" class="exam-unit-checkbox">
+        </div>
+      </label>
+      {% endfor %}
+    </div>
+    <div id="examUnitHint" class="mt-2 text-secondary text-sm" style="display:none;">请至少选择一个单元</div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header">题目数量</div>
+    <div class="flex items-center gap-3">
+      <input type="number" id="examCount" class="form-input" style="width:120px;" min="1" max="200" value="20">
+      <div class="flex gap-2">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="setExamCount(10)">10</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="setExamCount(20)">20</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="setExamCount(30)">30</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="setExamCount(50)">50</button>
+      </div>
+      <span class="text-secondary text-sm">道题</span>
+    </div>
+  </div>
+
+  <button type="button" class="btn btn-primary btn-lg w-full" onclick="startExam()">
+    <i class="ph ph-note-pencil"></i> 开始考试
+  </button>
+</div>
+
+<!-- ========== 阶段二：答题 ========== -->
+<div id="examAnswer" class="exam-phase hidden">
+  <div class="card mb-4">
+    <div class="flex justify-between items-center">
+      <div class="text-lg font-bold">第 <span id="examQIndex">1</span> / <span id="examQTotal">0</span> 题</div>
+      <div class="flex items-center gap-4">
+        <span id="examTimer" class="font-bold text-accent" style="font-family:monospace;font-size:1.15rem;">00:00</span>
+        <button type="button" class="btn btn-danger btn-sm" onclick="submitExam()">交卷</button>
+      </div>
+    </div>
+    <div class="progress-bar mt-2">
+      <div class="progress-bar-fill" id="examProgress" style="width:0%"></div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div id="examPrompt" class="exam-prompt">
+      <div class="text-sm text-secondary mb-2" id="examQuestionLabel">选择正确的中文释义</div>
+      <div id="examPromptMain"></div>
+    </div>
+    <div class="flex flex-col gap-2 mt-4" id="examOptions"></div>
+  </div>
+
+  <div class="flex justify-between mb-4">
+    <button type="button" class="btn btn-secondary" onclick="examPrev()"><i class="ph ph-arrow-left"></i> 上一题</button>
+    <button type="button" class="btn btn-primary" id="examNextBtn" onclick="examNext()">下一题 <i class="ph ph-arrow-right"></i></button>
+  </div>
+
+  <div class="card">
+    <div class="card-header">答题卡</div>
+    <div class="flex flex-wrap gap-2 mt-3" id="examNavigator"></div>
+    <div class="mt-4 flex justify-between items-center">
+      <span class="text-sm text-secondary">已答 <span id="examAnsweredCount" class="text-accent">0</span> / <span id="examAnsweredTotal">0</span></span>
+      <button type="button" class="btn btn-primary" onclick="submitExam()"><i class="ph ph-paper-plane-tilt"></i> 交卷</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 阶段三：成绩 ========== -->
+<div id="examResult" class="exam-phase hidden">
+  <div class="card mb-4 text-center">
+    <div class="card-header" style="justify-content:center;">考试成绩</div>
+    <div class="exam-score-ring" id="examScoreRing">
+      <div class="exam-score-inner">
+        <div class="exam-score-num" id="examScoreNum">0</div>
+        <div class="text-sm text-secondary">正确率</div>
+      </div>
+    </div>
+    <div class="flex justify-center gap-6 mt-4">
+      <div class="exam-stat"><div class="exam-stat-num" id="examCorrectCount">0</div><div class="text-sm text-secondary">答对</div></div>
+      <div class="exam-stat"><div class="exam-stat-num" id="examWrongCount">0</div><div class="text-sm text-secondary">答错</div></div>
+      <div class="exam-stat"><div class="exam-stat-num" id="examTimeUsed">--</div><div class="text-sm text-secondary">用时</div></div>
+    </div>
+    <div class="flex justify-center gap-3 mt-6">
+      <button type="button" class="btn btn-primary" onclick="examRestart()"><i class="ph ph-arrows-clockwise"></i> 再考一次</button>
+      <button type="button" class="btn btn-secondary" onclick="examBackToConfig()"><i class="ph ph-sliders-horizontal"></i> 返回配置</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header" id="examWrongHeader">错题回顾</div>
+    <div id="examWrongList" class="flex flex-col gap-2 mt-2"></div>
+    <div id="examAllCorrect" class="text-center text-accent hidden" style="padding:16px 0;">全部答对，太棒了！</div>
+  </div>
+</div>
+
+<style>
+.exam-prompt { text-align: center; padding: 8px 0; }
+.exam-prompt .exam-word { font-size: 2rem; font-weight: 700; letter-spacing: 1px; }
+.exam-prompt .exam-sub { color: var(--c-text-3); margin-top: 4px; }
+.exam-option {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  border: 1px solid var(--c-border); border-radius: var(--radius);
+  padding: 14px 16px; background: var(--c-surface); cursor: pointer;
+  transition: all .15s ease; text-align: left;
+}
+.exam-option:hover { border-color: var(--c-accent); background: var(--c-bg); }
+.exam-option.sel { border-color: var(--c-accent); background: rgba(5,150,105,.08); }
+.exam-option .exam-letter {
+  flex: none; width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--c-border); font-size: .85rem; color: var(--c-text-3);
+}
+.exam-option.sel .exam-letter { background: var(--c-accent); color: #fff; border-color: var(--c-accent); }
+.exam-dot {
+  width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--c-border);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--c-surface); cursor: pointer; font-size: .85rem;
+}
+.exam-dot.answered { background: rgba(5,150,105,.12); border-color: var(--c-accent); color: var(--c-accent); }
+.exam-dot.current { border-color: var(--c-accent); box-shadow: 0 0 0 2px rgba(5,150,105,.2); }
+.exam-score-ring {
+  width: 160px; height: 160px; border-radius: 50%; margin: 24px auto 0;
+  background: conic-gradient(var(--c-accent) 0%, var(--c-border) 0);
+  display: flex; align-items: center; justify-content: center;
+}
+.exam-score-inner {
+  width: 128px; height: 128px; border-radius: 50%;
+  background: var(--c-surface); display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+.exam-score-num { font-size: 2.2rem; font-weight: 700; color: var(--c-accent); }
+.exam-stat { min-width: 70px; text-align: center; }
+.exam-stat-num { font-size: 1.5rem; font-weight: 700; }
+.exam-wrong-item { border: 1px solid var(--c-border); border-radius: var(--radius); padding: 12px 16px; }
+.exam-wrong-item .ans-right { color: var(--c-green); }
+.exam-wrong-item .ans-wrong { color: var(--c-red); text-decoration: line-through; }</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ===== 状态 =====
+const EXAM_KEY = 'vocab-exam-state';
+var examState = null; // {phase, config, questions, answers, start}
+var examTimerInt = null;
+
+// ===== 单元 =====
+const examUnitWordCounts = {
+  {% for unit in units %}
+  "{{ unit.number }}": {{ unit.word_count }}{% if not forloop.last %},{% endif %}
+  {% endfor %}
+};
+
+function setExamCount(n) { document.getElementById('examCount').value = n; }
+
+function onExamUnitMode() {
+  const mode = document.querySelector('input[name=examUnitMode]:checked').value;
+  document.getElementById('examUnitGrid').classList.toggle('hidden', mode !== 'select');
+}
+
+function examSelectAllUnits() {
+  document.querySelectorAll('.exam-unit-checkbox').forEach(cb => cb.checked = true);
+}
+function examInvertUnits() {
+  document.querySelectorAll('.exam-unit-checkbox').forEach(cb => cb.checked = !cb.checked);
+}
+
+// ===== 开始考试 =====
+async function startExam() {
+  const scope = document.querySelector('input[name=examScope]:checked').value;
+  const category = document.querySelector('input[name=examCategory]:checked').value;
+  const direction = document.querySelector('input[name=examDirection]:checked').value;
+  let count = parseInt(document.getElementById('examCount').value, 10);
+  if (!count || count < 1) count = 20;
+  if (count > 200) count = 200;
+
+  let units = [];
+  const unitMode = document.querySelector('input[name=examUnitMode]:checked').value;
+  if (unitMode === 'select') {
+    units = Array.from(document.querySelectorAll('.exam-unit-checkbox:checked')).map(cb => cb.value);
+    if (units.length === 0) {
+      document.getElementById('examUnitHint').style.display = 'block';
+      showToast('请至少选择一个单元', 'error');
+      return;
+    }
+    document.getElementById('examUnitHint').style.display = 'none';
+  }
+
+  const params = new URLSearchParams({ scope, category, direction, count });
+  units.forEach(u => params.append('units', u));
+
+  const btn = event.target.closest('button');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i> 正在出题…';
+  try {
+    const res = await VOCAB_API.get('/api/exam/words/?' + params.toString());
+    if (!res.questions || res.questions.length === 0) {
+      showToast('该条件下没有可考试的单词，请调整筛选条件', 'error');
+      return;
+    }
+    examState = {
+      phase: 'answer',
+      config: { scope, category, direction, count, units },
+      questions: res.questions,
+      answers: {},
+      start: Date.now(),
+    };
+    saveExamState();
+    renderAnswer();
+  } catch (e) {
+    showToast('出题失败：' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ph ph-note-pencil"></i> 开始考试';
+  }
+}
+
+// ===== 答题渲染 =====
+var examCurrent = 0;
+
+function renderAnswer() {
+  document.getElementById('examConfig').classList.add('hidden');
+  document.getElementById('examResult').classList.add('hidden');
+  document.getElementById('examAnswer').classList.remove('hidden');
+  document.getElementById('examQTotal').textContent = examState.questions.length;
+  startExamTimer();
+  examCurrent = 0;
+  renderQuestion();
+}
+
+function renderQuestion() {
+  const q = examState.questions[examCurrent];
+  const total = examState.questions.length;
+  const dir = examState.config.direction;
+
+  document.getElementById('examQIndex').textContent = examCurrent + 1;
+  document.getElementById('examProgress').style.width = ((examCurrent + 1) / total * 100) + '%';
+
+  const label = document.getElementById('examQuestionLabel');
+  const main = document.getElementById('examPromptMain');
+  if (dir === 'en2zh') {
+    label.textContent = '选择正确的中文释义';
+    main.innerHTML = '<div class="exam-word">' + escapeHtml(q.word) + '</div>' +
+      '<div class="exam-sub">' + escapeHtml(q.phonetic_us || '') + (q.pos ? ' · ' + escapeHtml(q.pos) : '') + '</div>';
+  } else {
+    label.textContent = '选择正确的英文单词';
+    main.innerHTML = '<div class="exam-word" style="font-size:1.5rem;">' + escapeHtml(q.prompt) + '</div>';
+  }
+
+  const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
+  const optsEl = document.getElementById('examOptions');
+  optsEl.innerHTML = '';
+  q.options.forEach((opt, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'exam-option' + (examState.answers[q.id] === i ? ' sel' : '');
+    btn.innerHTML = '<span class="exam-letter">' + letters[i] + '</span><span>' + escapeHtml(opt) + '</span>';
+    btn.onclick = function () { selectOption(i); };
+    optsEl.appendChild(btn);
+  });
+
+  document.getElementById('examNextBtn').innerHTML = examCurrent === total - 1
+    ? '交卷 <i class="ph ph-paper-plane-tilt"></i>'
+    : '下一题 <i class="ph ph-arrow-right"></i>';
+  renderNavigator();
+}
+
+function selectOption(i) {
+  const q = examState.questions[examCurrent];
+  examState.answers[q.id] = i;
+  saveExamState();
+  renderQuestion();
+}
+
+function examPrev() { if (examCurrent > 0) { examCurrent--; renderQuestion(); } }
+function examNext() {
+  const total = examState.questions.length;
+  if (examCurrent < total - 1) { examCurrent++; renderQuestion(); }
+  else submitExam();
+}
+
+function renderNavigator() {
+  const nav = document.getElementById('examNavigator');
+  nav.innerHTML = '';
+  const total = examState.questions.length;
+  let answered = 0;
+  examState.questions.forEach((q, i) => {
+    const has = examState.answers[q.id] !== undefined;
+    if (has) answered++;
+    const d = document.createElement('div');
+    d.className = 'exam-dot' + (has ? ' answered' : '') + (i === examCurrent ? ' current' : '');
+    d.textContent = i + 1;
+    d.onclick = function () { examCurrent = i; renderQuestion(); };
+    nav.appendChild(d);
+  });
+  document.getElementById('examAnsweredCount').textContent = answered;
+  document.getElementById('examAnsweredTotal').textContent = total;
+}
+
+// ===== 计时 =====
+function startExamTimer() {
+  if (examTimerInt) clearInterval(examTimerInt);
+  examTimerInt = setInterval(function () {
+    const sec = Math.floor((Date.now() - examState.start) / 1000);
+    document.getElementById('examTimer').textContent = formatTime(sec);
+  }, 1000);
+}
+function formatTime(sec) {
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+// ===== 交卷 =====
+async function submitExam() {
+  const total = examState.questions.length;
+  const answered = Object.keys(examState.answers).length;
+  if (answered < total) {
+    if (!confirm('还有 ' + (total - answered) + ' 题未作答，确定交卷？未作答的题按错误计分。')) return;
+  } else {
+    if (!confirm('确定交卷吗？交卷后将自动更新单词掌握状态。')) return;
+  }
+  if (examTimerInt) { clearInterval(examTimerInt); examTimerInt = null; }
+
+  const duration = Math.floor((Date.now() - examState.start) / 1000);
+  const answers = examState.questions.map(q => ({
+    word_id: q.id,
+    selected: examState.answers[q.id] !== undefined ? examState.answers[q.id] : null,
+  }));
+
+  const btn = document.querySelector('#examAnswer .btn-danger');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i> 评分中…';
+  try {
+    const res = await VOCAB_API.post('/api/exam/submit/', { answers, duration });
+    if (!res.success) { showToast(res.error || '交卷失败', 'error'); return; }
+    examState.phase = 'result';
+    examState.result = res;
+    saveExamState();
+    renderResult(res);
+  } catch (e) {
+    showToast('交卷失败：' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '交卷';
+  }
+}
+
+// ===== 成绩 =====
+function renderResult(res) {
+  document.getElementById('examAnswer').classList.add('hidden');
+  document.getElementById('examResult').classList.remove('hidden');
+
+  const rate = res.correct_rate;
+  document.getElementById('examScoreNum').textContent = rate + '%';
+  const ring = document.getElementById('examScoreRing');
+  ring.style.background = 'conic-gradient(var(--c-accent) ' + rate + '%, var(--c-border) 0)';
+  document.getElementById('examCorrectCount').textContent = res.correct_count;
+  document.getElementById('examWrongCount').textContent = res.wrong_count;
+  document.getElementById('examTimeUsed').textContent = formatTime(res.duration);
+
+  const wrong = res.results.filter(r => !r.correct);
+  const list = document.getElementById('examWrongList');
+  list.innerHTML = '';
+  document.getElementById('examAllCorrect').classList.toggle('hidden', wrong.length > 0);
+  document.getElementById('examWrongHeader').textContent = '错题回顾' + (wrong.length ? '（' + wrong.length + ' 题）' : '');
+
+  const qmap = {};
+  examState.questions.forEach(q => { qmap[q.id] = q; });
+
+  wrong.forEach(r => {
+    const q = qmap[r.word_id] || {};
+    const opts = q.options || [];
+    const your = r.selected_index !== null && r.selected_index !== undefined ? opts[r.selected_index] : '（未作答）';
+    const item = document.createElement('div');
+    item.className = 'exam-wrong-item';
+    item.innerHTML =
+      '<div class="flex justify-between items-center mb-2">' +
+        '<strong>' + escapeHtml(r.word) + '</strong>' +
+        '<span class="text-sm text-secondary">已标记为「不会」</span>' +
+      '</div>' +
+      '<div class="text-sm">正确：<span class="ans-right">' + escapeHtml(opts[r.correct_index] || '') + '</span></div>' +
+      '<div class="text-sm">你的选择：<span class="ans-wrong">' + escapeHtml(String(your)) + '</span></div>';
+    list.appendChild(item);
+  });
+}
+
+// ===== 重新考试 / 返回配置 =====
+function examRestart() {
+  const cfg = examState.config;
+  localStorage.removeItem(EXAM_KEY);
+  // 恢复配置选项
+  document.querySelector('input[name=examScope][value="' + cfg.scope + '"]').checked = true;
+  document.querySelector('input[name=examCategory][value="' + cfg.category + '"]').checked = true;
+  document.querySelector('input[name=examDirection][value="' + cfg.direction + '"]').checked = true;
+  document.getElementById('examCount').value = cfg.count;
+  if (cfg.units && cfg.units.length) {
+    document.querySelector('input[name=examUnitMode][value=select]').checked = true;
+    document.querySelectorAll('.exam-unit-checkbox').forEach(cb => cb.checked = cfg.units.includes(cb.value));
+  } else {
+    document.querySelector('input[name=examUnitMode][value=all]').checked = true;
+  }
+  onExamUnitMode();
+  showPhase('config');
+  startExamFromConfig(cfg);
+}
+function examBackToConfig() {
+  localStorage.removeItem(EXAM_KEY);
+  examState = null;
+  showPhase('config');
+}
+async function startExamFromConfig(cfg) {
+  const params = new URLSearchParams({ scope: cfg.scope, category: cfg.category, direction: cfg.direction, count: cfg.count });
+  (cfg.units || []).forEach(u => params.append('units', u));
+  try {
+    const res = await VOCAB_API.get('/api/exam/words/?' + params.toString());
+    if (!res.questions || !res.questions.length) { showToast('该条件下没有可考试的单词', 'error'); return; }
+    examState = { phase: 'answer', config: cfg, questions: res.questions, answers: {}, start: Date.now() };
+    saveExamState();
+    renderAnswer();
+  } catch (e) {
+    showToast('出题失败：' + e.message, 'error');
+  }
+}
+
+// ===== 阶段切换 =====
+function showPhase(name) {
+  document.getElementById('examConfig').classList.toggle('hidden', name !== 'config');
+  document.getElementById('examAnswer').classList.toggle('hidden', name !== 'answer');
+  document.getElementById('examResult').classList.toggle('hidden', name !== 'result');
+}
+
+// ===== 持久化（刷新后恢复） =====
+function saveExamState() {
+  try { localStorage.setItem(EXAM_KEY, JSON.stringify(examState)); } catch (e) {}
+}
+function restoreExamState() {
+  try {
+    const raw = localStorage.getItem(EXAM_KEY);
+    if (!raw) return;
+    const st = JSON.parse(raw);
+    if (!st || !st.phase) return;
+    // 答题/结果阶段恢复
+    if (st.phase === 'answer' && st.questions && st.questions.length) {
+      examState = st;
+      renderAnswer();
+      return;
+    }
+    if (st.phase === 'result' && st.result) {
+      examState = st;
+      renderResult(st.result);
+    }
+  } catch (e) {}
+}
+
+// ===== 工具 =====
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  restoreExamState();
+});
+</script>
+{% endblock %}

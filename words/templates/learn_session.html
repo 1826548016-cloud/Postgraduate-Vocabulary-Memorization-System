@@ -1,0 +1,270 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}背诵中{% endblock %}
+{% block page_title %}背诵中{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<div class="card mb-4">
+  <div class="flex justify-between items-center gap-4 mb-4">
+    <div class="text-secondary text-sm">
+      <span>进度：</span>
+      <span id="progressText">-</span>
+    </div>
+    <div class="flex gap-2 items-center">
+      <button id="focusModeBtn" class="btn btn-secondary btn-sm" onclick="toggleFocusMode()" title="全屏沉浸式背诵"><i class="ph ph-eye"></i> 专注模式</button>
+      <span class="badge badge-learning">{{ mode }}</span>
+    </div>
+  </div>
+  <div class="progress-bar">
+    <div id="progressFill" class="progress-bar-fill" style="width: 0%;"></div>
+  </div>
+</div>
+
+<div id="wordCard" class="card word-card">
+  <div id="wordText" class="word-text">加载中…</div>
+  <button id="speakBtn" class="btn btn-secondary btn-sm" title="发音" style="margin-bottom: 12px;">🔊 发音</button>
+  <div id="wordPhonetic" class="word-phonetic">—</div>
+  <div id="wordPos" class="word-pos">—</div>
+  <div id="wordMeaning" class="word-meaning hidden">—</div>
+  <div id="wordExample" class="word-example hidden">—</div>
+
+  <div class="word-card-actions">
+    <button id="revealBtn" class="btn btn-primary btn-lg">显示释义 <span class="text-sm">(空格)</span></button>
+  </div>
+
+  <div class="word-card-actions">
+    <button data-action="mastered" class="mark-btn btn btn-primary btn-lg">会 <span class="text-sm">(1)</span></button>
+    <button data-action="unknown" class="mark-btn btn btn-danger btn-lg">不会 <span class="text-sm">(2)</span></button>
+  </div>
+
+  <div class="flex justify-center gap-4 mt-6">
+    <button id="prevBtn" class="btn btn-secondary">上一词 <span class="text-sm">(←)</span></button>
+    <button id="nextBtn" class="btn btn-secondary">下一词 <span class="text-sm">(→)</span></button>
+  </div>
+</div>
+
+<div id="completionCard" class="card word-card hidden">
+  <div class="card-header"><i class="ph ph-check-circle" style="color: var(--c-green);"></i> 背诵完成</div>
+  <p class="text-secondary" id="completionMsg"></p>
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div id="masteredCount" class="summary-value text-accent">0</div>
+      <div class="summary-label">会</div>
+    </div>
+    <div class="summary-card">
+      <div id="unknownCount" class="summary-value">0</div>
+      <div class="summary-label">不会</div>
+    </div>
+  </div>
+  <a href="{% url 'words:dashboard' %}" class="btn btn-primary btn-lg">返回仪表盘</a>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+  var wordsData = {{ words_json|safe }};
+  var wordCount = wordsData.length;
+  var mode = '{{ mode|escapejs }}';
+
+  // Restore index from sessionStorage (survives page refresh)
+  var savedIndex = sessionStorage.getItem('vocab-learn-idx');
+  var currentIndex = (savedIndex !== null) ? parseInt(savedIndex) : 0;
+  var currentWord = null;
+  var revealed = false;
+
+  var counts = { mastered: 0, unknown: 0 };
+  // Restore counts so refresh keeps 会/不会统计
+  try {
+    var savedCounts = JSON.parse(sessionStorage.getItem('vocab-learn-counts') || 'null');
+    if (savedCounts) {
+      counts.mastered = savedCounts.mastered || 0;
+      counts.unknown = savedCounts.unknown || 0;
+    }
+  } catch (e) {}
+
+  var els = {
+    progressText: document.getElementById('progressText'),
+    progressFill: document.getElementById('progressFill'),
+    wordCard: document.getElementById('wordCard'),
+    wordText: document.getElementById('wordText'),
+    wordPhonetic: document.getElementById('wordPhonetic'),
+    wordPos: document.getElementById('wordPos'),
+    wordMeaning: document.getElementById('wordMeaning'),
+    wordExample: document.getElementById('wordExample'),
+    revealBtn: document.getElementById('revealBtn'),
+    completionCard: document.getElementById('completionCard'),
+    masteredCount: document.getElementById('masteredCount'),
+    unknownCount: document.getElementById('unknownCount'),
+    completionMsg: document.getElementById('completionMsg'),
+  };
+
+  var focusActive = false;
+
+  function toggleFocusMode() {
+    focusActive = !focusActive;
+    if (focusActive) {
+      document.body.classList.add('focus-active');
+      document.getElementById('focusModeBtn').innerHTML = '<i class="ph ph-x"></i> 退出专注';
+      try {
+        if (document.documentElement.requestFullscreen) {
+          document.documentElement.requestFullscreen();
+        }
+      } catch (e) {}
+    } else {
+      document.body.classList.remove('focus-active');
+      document.getElementById('focusModeBtn').innerHTML = '<i class="ph ph-eye"></i> 专注模式';
+      try {
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        }
+      } catch (e) {}
+    }
+    // Trigger resize to re-layout
+    window.dispatchEvent(new Event('resize'));
+  }
+
+  // Listen for ESC to exit focus mode
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && focusActive) {
+      focusActive = false;
+      document.body.classList.remove('focus-active');
+      document.getElementById('focusModeBtn').innerHTML = '<i class="ph ph-eye"></i> 专注模式';
+    }
+  });
+
+  function saveProgress() {
+    sessionStorage.setItem('vocab-learn-idx', currentIndex);
+  }
+
+  function updateProgress() {
+    var pct = wordCount > 0 ? ((currentIndex + 1) / wordCount * 100) : 0;
+    els.progressText.textContent = (currentIndex + 1) + ' / ' + wordCount;
+    els.progressFill.style.width = pct + '%';
+  }
+
+  function doSpeak(text) { window.VOCAB_SPEAK(text); }
+
+  function replayAudio() {
+    if (currentWord) doSpeak(currentWord.word || '');
+  }
+
+  function formatMeanings(meanings) {
+    if (!meanings) return '';
+    if (Array.isArray(meanings)) {
+      return meanings.map(function(m, i) { return (i + 1) + '. ' + m; }).join('\n');
+    }
+    return String(meanings);
+  }
+
+  function renderWord() {
+    if (currentIndex >= wordCount) {
+      showCompletion();
+      return;
+    }
+
+    currentWord = wordsData[currentIndex];
+    revealed = false;
+
+    els.wordText.textContent = currentWord.word || '';
+    els.wordPhonetic.textContent = currentWord.phonetic_us || '';
+    els.wordPos.textContent = currentWord.pos || '';
+    els.wordMeaning.textContent = formatMeanings(currentWord.meanings);
+    els.wordMeaning.classList.add('hidden');
+    els.wordExample.textContent = (currentWord.example_en || '') + '\n' + (currentWord.example_zh || '');
+    els.wordExample.classList.add('hidden');
+    els.wordText.classList.remove('cover-mask');
+    els.revealBtn.textContent = '显示释义 (空格键)';
+    els.revealBtn.disabled = false;
+
+    updateProgress();
+    saveProgress();
+    doSpeak(currentWord.word || '');
+  }
+
+  function reveal() {
+    if (revealed || !currentWord) return;
+    revealed = true;
+    els.wordMeaning.classList.remove('hidden');
+    els.wordExample.classList.remove('hidden');
+    els.revealBtn.textContent = '已显示';
+    els.revealBtn.disabled = true;
+  }
+
+  function mark(action) {
+    if (!currentWord) return;
+    counts[action] = (counts[action] || 0) + 1;
+    sessionStorage.setItem('vocab-learn-counts', JSON.stringify(counts));
+
+    VOCAB_API.post('/api/mark/' + action + '/' + currentWord.id + '/', {})
+      .then(function () { advance(); })
+      .catch(function () { showToast('标记失败', 'error'); });
+  }
+
+  function advance() {
+    if (currentIndex >= wordCount - 1) {
+      showCompletion();
+      return;
+    }
+    currentIndex++;
+    renderWord();
+  }
+
+  function goPrev() {
+    if (currentIndex <= 0) return;
+    currentIndex--;
+    renderWord();
+  }
+
+  function goNext() {
+    advance();
+  }
+
+  function showCompletion() {
+    els.wordCard.classList.add('hidden');
+    els.completionCard.classList.remove('hidden');
+    els.masteredCount.textContent = counts.mastered;
+    els.unknownCount.textContent = counts.unknown;
+    var msg = '本次共学习 ' + wordCount + ' 个单词';
+    els.completionMsg.textContent = msg;
+    sessionStorage.removeItem('vocab-learn-idx');
+    sessionStorage.removeItem('vocab-learn-counts');
+  }
+
+  // Button bindings
+  els.revealBtn.addEventListener('click', reveal);
+  document.getElementById('speakBtn').addEventListener('click', replayAudio);
+  document.getElementById('prevBtn').addEventListener('click', goPrev);
+  document.getElementById('nextBtn').addEventListener('click', goNext);
+
+  document.querySelectorAll('.mark-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() { mark(btn.dataset.action); });
+  });
+
+  // Keyboard
+  document.addEventListener('keydown', function(e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    switch (e.code) {
+      case 'Space': e.preventDefault(); reveal(); break;
+      case 'Digit1': case 'Numpad1': e.preventDefault(); mark('mastered'); break;
+      case 'Digit2': case 'Numpad2': e.preventDefault(); mark('unknown'); break;
+      case 'ArrowLeft': e.preventDefault(); goPrev(); break;
+      case 'ArrowRight': e.preventDefault(); goNext(); break;
+    }
+  });
+
+  // Init
+  if (wordCount === 0) {
+    els.wordText.textContent = '没有可学习的单词';
+    els.revealBtn.style.display = 'none';
+  } else {
+    // Clamp index in case it's out of range
+    if (currentIndex >= wordCount) currentIndex = 0;
+    renderWord();
+  }
+})();
+</script>
+{% endblock %}

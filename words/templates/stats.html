@@ -1,0 +1,402 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}统计报表 - 考研单词背诵系统{% endblock %}
+{% block page_title %}统计报表{% endblock %}
+
+{% block extra_head %}
+<script src="{% static 'echarts.min.js' %}"></script>
+{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<!-- Summary Cards -->
+<div class="card-grid" style="margin-bottom: 24px;">
+  <div class="card stat-card">
+    <div class="card-header" style="display: flex; align-items: center; gap: 6px;"><i class="ph ph-book-open ph-sm"></i> 总新词数</div>
+    <div class="stat-value" id="summaryNew">-</div>
+    <div class="stat-label">所选周期内</div>
+  </div>
+  <div class="card stat-card">
+    <div class="card-header" style="display: flex; align-items: center; gap: 6px;"><i class="ph ph-arrows-clockwise ph-sm"></i> 总复习数</div>
+    <div class="stat-value" id="summaryReview">-</div>
+    <div class="stat-label">所选周期内</div>
+  </div>
+  <div class="card stat-card">
+    <div class="card-header" style="display: flex; align-items: center; gap: 6px;"><i class="ph ph-chart-bar ph-sm"></i> 平均正确率</div>
+    <div class="stat-value" id="summaryRate">-</div>
+    <div class="stat-label">所选周期内</div>
+  </div>
+  <div class="card stat-card">
+    <div class="card-header" style="display: flex; align-items: center; gap: 6px;"><i class="ph ph-fire ph-sm"></i> 连续打卡</div>
+    <div class="stat-value text-accent" id="summaryStreak">- 天</div>
+    <div class="stat-label">当前连续</div>
+  </div>
+</div>
+
+<!-- Period Selector -->
+<div class="card" style="margin-bottom: 24px;">
+  <div class="flex items-center gap-4" style="flex-wrap: wrap;">
+    <span class="card-header" style="margin: 0;">时间范围：</span>
+    <button class="btn btn-primary period-btn" data-period="7">7 天</button>
+    <button class="btn btn-secondary period-btn" data-period="30">30 天</button>
+    <button class="btn btn-secondary period-btn" data-period="365">全部</button>
+  </div>
+</div>
+
+<!-- Charts Row -->
+<div class="card-grid" style="margin-bottom: 24px;">
+  <!-- Trend Chart -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-header">学习趋势</div>
+    <div id="trendChart" style="height: 350px;"></div>
+  </div>
+</div>
+
+<!-- Category & Level Row -->
+<div class="card-grid" style="margin-bottom: 24px;">
+  <!-- Category Pie Chart -->
+  <div class="card">
+    <div class="card-header">分类进度</div>
+    <div id="categoryChart" style="height: 300px; max-width: 300px; margin: 0 auto;"></div>
+  </div>
+
+  <!-- Mastery Level Bar Chart -->
+  <div class="card">
+    <div class="card-header">掌握度分布</div>
+    <div id="levelChart" style="height: 300px;"></div>
+  </div>
+</div>
+
+<!-- Ebbinghaus Forgetting Curve -->
+<div class="card" style="margin-bottom: 24px;">
+  <div class="card-header">艾宾浩斯遗忘曲线</div>
+  <p class="text-sm text-secondary" style="margin-bottom: 12px;">
+    复习间隔：学习后 1天 → 2天 → 4天 → 7天 → 15天 → 30天，科学对抗遗忘
+  </p>
+  <div id="ebbinghausChart" style="height: 260px;"></div>
+</div>
+
+<!-- Error Words TOP 20 -->
+<div class="card" style="margin-bottom: 24px;">
+  <div class="card-header">高频易错词 TOP 20</div>
+  <div id="errorWordsList">
+    <p class="text-secondary">正在加载...</p>
+  </div>
+</div>
+
+<!-- Export Button -->
+<div class="card" style="margin-bottom: 24px;">
+  <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 16px;">
+    <div class="card-header" style="margin: 0;">导出数据</div>
+    <div class="flex gap-4" style="flex-wrap: wrap;">
+      <button class="btn btn-primary" onclick="exportPDF('all')">导出全部单词 PDF</button>
+      <button class="btn btn-secondary" onclick="exportPDF('errors')">导出易错词 PDF</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ===== State =====
+var trendChart = null;
+var categoryChart = null;
+var levelChart = null;
+var ebbinghausChart = null;
+var currentPeriod = sessionStorage.getItem('vocab-stats-period') || '7';
+
+// ===== Period Switcher =====
+function applyPeriodUI() {
+  document.querySelectorAll('.period-btn').forEach(function (b) {
+    if (b.dataset.period === currentPeriod) {
+      b.className = 'btn btn-primary period-btn';
+    } else {
+      b.className = 'btn btn-secondary period-btn';
+    }
+  });
+}
+
+document.querySelectorAll('.period-btn').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    currentPeriod = this.dataset.period;
+    sessionStorage.setItem('vocab-stats-period', currentPeriod);
+    applyPeriodUI();
+    loadStats();
+  });
+});
+
+// ===== Load Stats =====
+async function loadStats() {
+  try {
+    var res = await VOCAB_API.get('/api/stats/' + currentPeriod + '/');
+    renderSummary(res.summary);
+    renderTrendChart(res.days);
+    renderCategoryChart(res.category_progress);
+    renderLevelChart(res.level_distribution);
+    renderErrorWords(res.error_words);
+  } catch (e) {
+    console.error('加载统计数据失败', e);
+  }
+}
+
+// ===== Summary Cards =====
+function renderSummary(summary) {
+  document.getElementById('summaryNew').textContent = summary.total_new;
+  document.getElementById('summaryReview').textContent = summary.total_reviewed;
+  document.getElementById('summaryRate').textContent = summary.avg_correct_rate + '%';
+  document.getElementById('summaryStreak').textContent = summary.streak + ' 天';
+}
+
+// ===== Trend Chart (Stacked Smooth Line) =====
+function renderTrendChart(days) {
+  var dom = document.getElementById('trendChart');
+  if (trendChart) trendChart.dispose();
+  trendChart = echarts.init(dom);
+
+  var labels = days.map(function (d) { return d.date; });
+  var newData = days.map(function (d) { return d.new_words; });
+  var reviewData = days.map(function (d) { return d.reviewed; });
+
+  trendChart.setOption({
+    tooltip: {
+      trigger: 'axis',
+      formatter: function (params) {
+        var date = params[0].axisValue;
+        var total = 0;
+        var html = '<strong>' + date + '</strong><br/>';
+        params.forEach(function (p) {
+          total += p.value;
+          html += p.marker + ' ' + p.seriesName + ': ' + p.value + '<br/>';
+        });
+        html += '<hr style="margin:4px 0;border:none;border-top:1px solid #ddd"/>';
+        html += '<strong>总计: ' + total + '</strong>';
+        return html;
+      }
+    },
+    legend: { top: 0, data: ['新学词数', '复习词数'] },
+    grid: { left: 55, right: 25, top: 45, bottom: 30 },
+    xAxis: {
+      type: 'category',
+      data: labels,
+      axisLabel: { rotate: labels.length > 10 ? 45 : 0 }
+    },
+    yAxis: {
+      type: 'value',
+      minInterval: 1
+    },
+    series: [
+      {
+        name: '新学词数',
+        type: 'line',
+        stack: 'total',
+        smooth: true,
+        lineStyle: { color: '#059669', width: 2 },
+        itemStyle: { color: '#059669' },
+        areaStyle: { color: 'rgba(5,150,105,0.2)' },
+        symbolSize: 6,
+        data: newData
+      },
+      {
+        name: '复习词数',
+        type: 'line',
+        stack: 'total',
+        smooth: true,
+        lineStyle: { color: '#7c3aed', width: 2 },
+        itemStyle: { color: '#7c3aed' },
+        areaStyle: { color: 'rgba(124,58,237,0.2)' },
+        symbolSize: 6,
+        data: reviewData
+      }
+    ]
+  });
+
+  window.addEventListener('resize', function() { trendChart.resize(); });
+}
+
+// ===== Category Pie Chart (ECharts) =====
+function renderCategoryChart(catProgress) {
+  var dom = document.getElementById('categoryChart');
+  if (categoryChart) categoryChart.dispose();
+  categoryChart = echarts.init(dom);
+
+  var pieData = [];
+  var colors = ['#059669', '#3b82f6', '#f59e0b'];
+  var i = 0;
+  for (var code in catProgress) {
+    var c = catProgress[code];
+    pieData.push({
+      name: c.label,
+      value: c.mastered,
+      total: c.total,
+      itemStyle: { color: colors[i] || '#999' }
+    });
+    i++;
+  }
+
+  categoryChart.setOption({
+    tooltip: {
+      trigger: 'item',
+      formatter: function (p) {
+        return p.name + ': ' + p.value + ' / ' + p.data.total + ' 已掌握';
+      }
+    },
+    legend: { bottom: 0, data: pieData.map(function(d) { return d.name; }) },
+    series: [{
+      type: 'pie',
+      radius: ['45%', '75%'],
+      center: ['50%', '45%'],
+      label: { show: false },
+      emphasis: { label: { show: true, fontSize: 16, fontWeight: 'bold' } },
+      data: pieData
+    }]
+  });
+}
+
+// ===== Level Distribution Bar Chart (ECharts) =====
+function renderLevelChart(levelDist) {
+  var dom = document.getElementById('levelChart');
+  if (levelChart) levelChart.dispose();
+  levelChart = echarts.init(dom);
+
+  var labels = levelDist.map(function (d) { return 'L' + d.level; });
+  var data = levelDist.map(function (d) { return d.count; });
+  var colors = ['#dbeafe', '#bfdbfe', '#93c5fd', '#60a5fa', '#3b82f6', '#059669'];
+
+  levelChart.setOption({
+    tooltip: { trigger: 'axis' },
+    grid: { left: 50, right: 20, top: 20, bottom: 40 },
+    xAxis: {
+      type: 'category',
+      data: labels
+    },
+    yAxis: {
+      type: 'value',
+      minInterval: 1
+    },
+    series: [{
+      type: 'bar',
+      data: data.map(function(v, i) {
+        return { value: v, itemStyle: { color: colors[i], borderRadius: [4, 4, 0, 0] } };
+      }),
+      barWidth: '50%'
+    }]
+  });
+
+  window.addEventListener('resize', function() { levelChart.resize(); });
+}
+
+// ===== Error Words List =====
+function renderErrorWords(errorWords) {
+  var container = document.getElementById('errorWordsList');
+
+  if (!errorWords || errorWords.length === 0) {
+    container.innerHTML = '<p class="text-secondary">暂无易错词数据，开始学习后这里会显示高频易错词。</p>';
+    return;
+  }
+
+  var tableHtml = '<table class="data-table"><thead><tr>' +
+    '<th>#</th><th>单词</th><th>错误次数</th><th>复习次数</th><th>状态</th>' +
+    '</tr></thead><tbody>';
+
+  errorWords.forEach(function (w, i) {
+    var statusBadge = '';
+    if (w.status === 'mastered') statusBadge = '<span class="badge badge-mastered">会</span>';
+    else statusBadge = '<span class="badge badge-new">不会</span>';
+
+    tableHtml += '<tr>' +
+      '<td>' + (i + 1) + '</td>' +
+      '<td><strong>' + w.word + '</strong></td>' +
+      '<td>' + w.error_count + '</td>' +
+      '<td>' + w.review_count + '</td>' +
+      '<td>' + statusBadge + '</td>' +
+      '</tr>';
+  });
+
+  tableHtml += '</tbody></table>';
+  container.innerHTML = tableHtml;
+}
+
+// ===== PDF Export =====
+function exportPDF(type) {
+  window.open('/api/export/pdf/?type=' + type, '_blank');
+}
+
+// ===== Ebbinghaus Forgetting Curve =====
+function renderEbbinghausChart() {
+  var dom = document.getElementById('ebbinghausChart');
+  if (ebbinghausChart) ebbinghausChart.dispose();
+  ebbinghausChart = echarts.init(dom);
+
+  // Simulated memory retention based on Ebbinghaus intervals
+  var days = [0, 1, 2, 4, 7, 15, 30];
+  var retentionRate = [100, 58, 44, 36, 28, 25, 21];
+  var withReview = [100, 90, 85, 80, 75, 70, 65];
+
+  ebbinghausChart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { top: 0, data: ['自然遗忘曲线', '按时复习曲线'] },
+    grid: { left: 55, right: 20, top: 40, bottom: 30 },
+    xAxis: {
+      type: 'category',
+      data: days.map(function (d) { return d === 0 ? '学习当天' : d + '天'; }),
+      axisLabel: { rotate: 30 }
+    },
+    yAxis: {
+      type: 'value',
+      name: '记忆保留率 (%)',
+      max: 105,
+      min: 0,
+      axisLabel: { formatter: '{value}%' }
+    },
+    series: [
+      {
+        name: '自然遗忘曲线',
+        type: 'line',
+        data: retentionRate,
+        smooth: true,
+        lineStyle: { color: '#ef4444', width: 2, type: 'dashed' },
+        itemStyle: { color: '#ef4444' },
+        symbolSize: 8,
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          lineStyle: { color: '#ef4444', type: 'dotted', opacity: 0.3 },
+          data: [{ yAxis: 50, label: { formatter: '遗忘临界点', fontSize: 10 } }]
+        }
+      },
+      {
+        name: '按时复习曲线',
+        type: 'line',
+        data: withReview,
+        smooth: true,
+        lineStyle: { color: '#059669', width: 3 },
+        itemStyle: { color: '#059669' },
+        areaStyle: { color: 'rgba(5,150,105,0.15)' },
+        symbolSize: 8,
+        markPoints: {
+          data: days.map(function (d, i) {
+            return {
+              coord: [i, withReview[i]],
+              value: withReview[i] + '%',
+              symbolSize: 0,
+              label: { show: false }
+            };
+          })
+        }
+      }
+    ]
+  });
+
+  window.addEventListener('resize', function () { ebbinghausChart.resize(); });
+}
+
+// ===== Initial Load =====
+document.addEventListener('DOMContentLoaded', function () {
+  applyPeriodUI();
+  renderEbbinghausChart();
+  loadStats();
+});
+</script>
+{% endblock %}

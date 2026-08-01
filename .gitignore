@@ -1,0 +1,15 @@
+# 临时验证文件
+_check.js
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 数据库与本地数据（含个人学习数据，勿提交到公开仓库）
+db.sqlite3
+backups/
+media/
+
+# 其他
+*.log
+.DS_Store

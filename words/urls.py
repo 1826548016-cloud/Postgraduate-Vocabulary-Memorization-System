@@ -1,0 +1,55 @@
+from django.urls import path
+from . import views
+
+app_name = 'words'
+
+urlpatterns = [
+    # Page routes
+    path('', views.dashboard, name='dashboard'),
+    path('words/', views.word_list, name='word_list'),
+    path('ai-import/', views.ai_import, name='ai_import'),
+    path('words/<int:word_id>/', views.word_detail, name='word_detail'),
+    path('learn/', views.learn_start, name='learn_start'),
+    path('learn/session/', views.learn_session, name='learn_session'),
+    path('review/', views.review_session, name='review_session'),
+    path('stats/', views.statistics, name='statistics'),
+    path('plan/', views.study_plan, name='study_plan'),
+    path('plan/create/', views.plan_create, name='plan_create'),
+    path('settings/', views.settings_page, name='settings_page'),
+    path('favorites/', views.favorites_list, name='favorites_list'),
+    path('focus/', views.focus_mode, name='focus_mode'),
+    path('exam/', views.exam, name='exam'),
+
+    # API routes
+    path('api/words/', views.api_words, name='api_words'),
+    path('api/words/<int:word_id>/', views.api_word_detail, name='api_word_detail'),
+    path('api/mark/<str:action>/<int:word_id>/', views.api_mark_word, name='api_mark_word'),
+    path('api/toggle/<int:word_id>/', views.api_toggle_mastery, name='api_toggle_mastery'),
+    path('api/today/', views.api_today, name='api_today'),
+    path('api/progress/reset/', views.api_reset_progress, name='api_reset_progress'),
+    path('api/plan/create/', views.api_plan_create, name='api_plan_create'),
+    path('api/plan/update/<int:plan_id>/', views.api_plan_update, name='api_plan_update'),
+    path('api/checkin/', views.api_checkin, name='api_checkin'),
+    path('api/stats/<str:period>/', views.api_stats, name='api_stats'),
+    path('api/export/pdf/', views.api_export_pdf, name='api_export_pdf'),
+    path('api/backup/', views.api_backup, name='api_backup'),
+    path('api/restore/', views.api_restore, name='api_restore'),
+    path('api/settings/', views.api_settings, name='api_settings'),
+    path('api/note/<int:word_id>/', views.api_note, name='api_note'),
+    path('api/favorite/<int:word_id>/', views.api_favorite, name='api_favorite'),
+    path('api/learn-words/', views.api_learn_words, name='api_learn_words'),
+    path('api/units/', views.api_units, name='api_units'),
+    path('api/unit/create/', views.api_unit_create, name='api_unit_create'),
+    path('api/unit/delete/<int:unit_number>/', views.api_unit_delete, name='api_unit_delete'),
+    path('api/unit/update/<int:unit_number>/', views.api_unit_update, name='api_unit_update'),
+    path('api/plan/delete/<int:plan_id>/', views.api_plan_delete, name='api_plan_delete'),
+    path('api/word/create/', views.api_word_create, name='api_word_create'),
+    path('api/word/update/<int:word_id>/', views.api_word_update, name='api_word_update'),
+    path('api/word/delete/<int:word_id>/', views.api_word_delete, name='api_word_delete'),
+    path('api/word/bulk-import/', views.api_word_bulk_import, name='api_word_bulk_import'),
+    path('api/ai/recognize/', views.api_ai_recognize, name='api_ai_recognize'),
+    path('api/ai/review/', views.api_ai_review, name='api_ai_review'),
+    path('api/ai/test/', views.api_ai_test, name='api_ai_test'),
+    path('api/exam/words/', views.api_exam_words, name='api_exam_words'),
+    path('api/exam/submit/', views.api_exam_submit, name='api_exam_submit'),
+]

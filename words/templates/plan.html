@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}学习计划 - 考研单词背诵系统{% endblock %}
+{% block page_title %}学习计划{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<!-- Create Plan Button -->
+<div class="flex justify-between items-center" style="margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+  <h2 style="margin: 0; font-size: var(--font-xl);">我的学习计划</h2>
+  <a href="{% url 'words:plan_create' %}" class="btn btn-primary">+ 创建新计划</a>
+</div>
+
+<!-- Existing Plans -->
+<div id="planList">
+  {% if plans %}
+    {% for plan in plans %}
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 16px; margin-bottom: 16px;">
+        <div>
+          <div class="card-header" style="margin-bottom: 4px;">
+            {{ plan.name }}
+            {% if plan.is_active %}
+              <span class="badge badge-mastered">当前计划</span>
+            {% endif %}
+          </div>
+          <div class="text-sm text-secondary">创建于 {{ plan.start_date }}</div>
+        </div>
+        <div class="flex gap-2">
+          {% if not plan.is_active %}
+          <button class="btn btn-secondary btn-sm" onclick="activatePlan({{ plan.id }})">启用</button>
+          {% endif %}
+          <a href="{% url 'words:plan_create' %}?plan_id={{ plan.id }}" class="btn btn-secondary btn-sm">编辑</a>
+          <button class="btn btn-danger btn-sm" onclick="deletePlan({{ plan.id }}, '{{ plan.name }}')">删除</button>
+        </div>
+      </div>
+
+      <div class="card-grid" style="margin-bottom: 0;">
+        <div class="stat-card">
+          <div class="stat-label">每日新词</div>
+          <div class="stat-value" style="font-size: var(--font-xl);">{{ plan.daily_new_words }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">每日复习</div>
+          <div class="stat-value" style="font-size: var(--font-xl);">{{ plan.daily_review_count }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">剩余单词</div>
+          <div class="stat-value" style="font-size: var(--font-xl);">{{ plan.remaining_words }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">预计完成天数</div>
+          <div class="stat-value" style="font-size: var(--font-xl);">{{ plan.estimated_days }}</div>
+        </div>
+      </div>
+
+      {% if plan.target_date %}
+      <div class="text-sm text-secondary" style="margin-top: 16px;">
+        目标完成日期：{{ plan.target_date }}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="card text-center" style="padding: 48px 24px;">
+      <div class="text-secondary" style="font-size: var(--font-lg); margin-bottom: 16px;">
+        还没有学习计划
+      </div>
+      <p class="text-secondary" style="margin-bottom: 24px;">
+        创建学习计划，设定每日新词和复习目标，让学习更有规划！
+      </p>
+      <a href="{% url 'words:plan_create' %}" class="btn btn-primary btn-lg">创建我的第一个计划</a>
+    </div>
+  {% endif %}
+</div>
+
+<!-- Plan Tips -->
+<div class="card" style="margin-top: 24px;">
+  <div class="card-header">学习建议</div>
+  <ul style="margin: 0; padding-left: 20px; color: var(--text-secondary); line-height: 2;">
+    <li>每天坚持学习比一次性突击更有效</li>
+    <li>新词 + 复习搭配进行效果最好</li>
+    <li>利用艾宾浩斯遗忘曲线，按时复习巩固记忆</li>
+    <li>建议每日新词不超过 50 个，保证每个词都有足够时间消化</li>
+    <li>定期查看统计报表，了解自己的薄弱环节</li>
+  </ul>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+async function activatePlan(planId) {
+  try {
+    var res = await VOCAB_API.post('/api/plan/update/' + planId + '/', { is_active: true });
+    if (res.success) {
+      showToast('计划已启用', 'success');
+      setTimeout(function () { window.location.reload(); }, 500);
+    } else {
+      showToast(res.error || '操作失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
+}
+
+async function deletePlan(planId, planName) {
+  if (!confirm('确定要删除计划"' + planName + '"吗？\n\n此操作不可恢复。')) {
+    return;
+  }
+
+  try {
+    var res = await VOCAB_API.del('/api/plan/delete/' + planId + '/');
+    if (res.success) {
+      showToast(res.message, 'success');
+      setTimeout(function () { window.location.reload(); }, 500);
+    } else {
+      showToast(res.error || '删除失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
+}
+</script>
+{% endblock %}

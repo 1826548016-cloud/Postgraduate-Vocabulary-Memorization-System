@@ -1,0 +1,463 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}专注模式 - 考研单词背诵系统{% endblock %}
+{% block page_title %}专注模式{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<div id="focusApp">
+  <!-- Setup: choose scope + units + mode -->
+  <div id="focusSetup">
+    <div class="card mb-4">
+      <div class="card-header">背诵范围</div>
+    <div class="flex flex-col gap-2">
+      <label class="flex items-center gap-2">
+        <input type="radio" name="focusScope" value="unknown" checked>
+        <span>不会的词 <span class="text-secondary text-sm">（未掌握的全部单词）</span></span>
+      </label>
+      <label class="flex items-center gap-2">
+        <input type="radio" name="focusScope" value="mastered">
+        <span>会的词 <span class="text-secondary text-sm">（已掌握的单词，用于复习）</span></span>
+      </label>
+    </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header">背诵模式</div>
+      <div class="flex flex-col gap-2">
+        <label class="flex items-center gap-2">
+          <input type="radio" name="focusMode" value="sequential" checked>
+          <span>顺序背诵</span>
+        </label>
+        <label class="flex items-center gap-2">
+          <input type="radio" name="focusMode" value="random">
+          <span>乱序背诵</span>
+        </label>
+        <label class="flex items-center gap-2">
+          <input type="radio" name="focusMode" value="cover_en">
+          <span>遮英文回忆中文</span>
+        </label>
+        <label class="flex items-center gap-2">
+          <input type="radio" name="focusMode" value="cover_zh">
+          <span>遮中文默写英文</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="flex justify-between items-center mb-4">
+        <div class="card-header">选择单元</div>
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="focusSelectAll()">全选</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="focusInvertSelection()">反选</button>
+        </div>
+      </div>
+
+      <div class="card-grid">
+        {% for unit in units %}
+        <label class="card">
+          <div class="flex justify-between items-center mb-2">
+            <div>
+              <div>Unit {{ unit.number }} - {{ unit.name }}</div>
+              <div class="text-sm text-secondary">{{ unit.word_count }} 词</div>
+            </div>
+            <input type="checkbox" class="focus-unit-checkbox" value="{{ unit.number }}" onchange="focusUpdateSelected()">
+          </div>
+          <div class="progress-bar">
+            <div class="progress-bar-fill" style="width: {{ unit.progress_percent }}%"></div>
+          </div>
+          <div class="text-sm text-secondary mt-2">已掌握 {{ unit.mastered_count }} / {{ unit.word_count }}</div>
+        </label>
+        {% endfor %}
+      </div>
+
+      <div class="mt-4 text-secondary">
+        已选择 <span id="focusSelectedCount" class="text-accent">0</span> 个单元，共 <span id="focusSelectedWords" class="text-accent">0</span> 个单词
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-lg w-full" onclick="startFocus()">开始专注</button>
+  </div>
+
+  <!-- Focus Session -->
+  <div id="focusSession" class="hidden" style="min-height: 80dvh; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+    <!-- Progress -->
+    <div style="width: 100%; max-width: 600px; margin-bottom: 24px;">
+      <div class="flex justify-between items-center" style="margin-bottom: 8px;">
+        <span class="text-secondary" id="focusCounter">0 / 0</span>
+        <span class="text-secondary">按 ESC 退出专注</span>
+      </div>
+      <div class="progress-bar" style="height: 4px;">
+        <div class="progress-bar-fill" id="focusProgress" style="width: 0%;"></div>
+      </div>
+    </div>
+
+    <!-- Word Card -->
+    <div class="card word-card" id="focusCard" style="cursor: pointer; min-width: 300px; max-width: 600px; width: 100%;">
+      <div class="word-text" id="focusWord" style="margin-bottom: 8px;">-</div>
+      <button class="btn btn-secondary btn-sm" onclick="replayFocusAudio()" title="发音" style="margin-bottom: 16px;"><i class="ph ph-speaker-high"></i> 发音</button>
+      <div id="focusDetails" style="display: none;">
+        <div class="word-phonetic" id="focusPhonetic" style="margin-bottom: 8px;"></div>
+        <div class="word-pos" id="focusPos" style="margin-bottom: 4px;"></div>
+        <div class="word-meaning" id="focusMeaning"></div>
+        <div class="word-example" id="focusExample" style="margin-top: 16px;"></div>
+      </div>
+      <div class="text-secondary text-sm" style="margin-top: 24px;">点击卡片或按空格翻转</div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="word-card-actions" style="margin-top: 32px;">
+      <button class="btn btn-secondary" onclick="focusPrev()">← 上一个</button>
+      <button class="btn btn-danger" onclick="focusMark('unknown')">不会</button>
+      <button class="btn btn-primary" onclick="focusMark('mastered')">会</button>
+      <button class="btn btn-secondary" onclick="focusNext()">下一个 →</button>
+    </div>
+
+    <!-- Keyboard hints -->
+    <div class="text-sm text-secondary" style="margin-top: 24px; text-align: center;">
+      快捷键：空格 翻转 | 1 会 | 2 不会 | ← → 翻页 | ESC 退出
+    </div>
+
+    <!-- Completion -->
+    <div id="focusComplete" class="hidden card text-center" style="margin-top: 48px; padding: 48px;">
+      <div style="font-size: 3rem; margin-bottom: 16px;"><i class="ph ph-check-circle" style="color: var(--c-green);"></i></div>
+      <div style="font-size: var(--fs-2xl); font-weight: 700; margin-bottom: 8px;">专注完成！</div>
+      <div class="text-secondary" style="margin-bottom: 24px;" id="focusSummary"></div>
+      <div class="flex gap-4 justify-center">
+        <button class="btn btn-primary" onclick="focusReset()">再来一轮</button>
+        <a href="{% url 'words:dashboard' %}" class="btn btn-secondary">返回首页</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ===== Unit selection helpers =====
+const focusUnitWordCounts = {
+  {% for unit in units %}
+  "{{ unit.number }}": {{ unit.word_count }}{% if not forloop.last %},{% endif %}
+  {% endfor %}
+};
+
+function focusSelectAll() {
+  document.querySelectorAll('.focus-unit-checkbox').forEach(cb => cb.checked = true);
+  focusUpdateSelected();
+}
+
+function focusInvertSelection() {
+  document.querySelectorAll('.focus-unit-checkbox').forEach(cb => cb.checked = !cb.checked);
+  focusUpdateSelected();
+}
+
+function focusUpdateSelected() {
+  const checked = document.querySelectorAll('.focus-unit-checkbox:checked');
+  let totalWords = 0;
+  checked.forEach(cb => {
+    totalWords += focusUnitWordCounts[cb.value] || 0;
+  });
+  document.getElementById('focusSelectedCount').textContent = checked.length;
+  document.getElementById('focusSelectedWords').textContent = totalWords;
+}
+
+// ===== State =====
+var focusWords = [];
+var focusIndex = 0;
+var focusMode = 'sequential';
+var isFlipped = false;
+var sessionStats = { total: 0, mastered: 0, unknown: 0 };
+var sessionCompleted = false;
+
+// ===== 状态持久化：刷新后保留当前专注进度 =====
+function focusSaveState() {
+  try {
+    sessionStorage.setItem('vocab-focus', JSON.stringify({
+      words: focusWords,
+      index: focusIndex,
+      mode: focusMode,
+      stats: sessionStats,
+      completed: sessionCompleted
+    }));
+  } catch (e) {}
+}
+
+function focusRestoreState() {
+  try {
+    var s = JSON.parse(sessionStorage.getItem('vocab-focus') || 'null');
+    if (!s || !s.words || s.words.length === 0) return false;
+    focusWords = s.words;
+    focusIndex = s.index || 0;
+    focusMode = s.mode || 'sequential';
+    sessionStats = s.stats || { total: 0, mastered: 0, unknown: 0 };
+    sessionCompleted = !!s.completed;
+    return true;
+  } catch (e) { return false; }
+}
+
+function focusEnterSession() {
+  document.getElementById('focusSetup').classList.add('hidden');
+  document.getElementById('focusSession').classList.remove('hidden');
+  document.getElementById('focusComplete').classList.add('hidden');
+  if (sessionCompleted) {
+    focusShowComplete();
+  } else {
+    focusRender();
+  }
+}
+
+function focusClearState() {
+  sessionStorage.removeItem('vocab-focus');
+}
+
+// ===== Start Focus =====
+async function startFocus() {
+  var scope = document.querySelector('input[name="focusScope"]:checked');
+  if (!scope) { showToast('请选择背诵范围', 'error'); return; }
+  var scopeVal = scope.value;
+
+  var mode = document.querySelector('input[name="focusMode"]:checked');
+  if (!mode) { showToast('请选择背诵模式', 'error'); return; }
+  focusMode = mode.value;
+
+  var unitCbs = document.querySelectorAll('.focus-unit-checkbox:checked');
+  if (unitCbs.length === 0) { showToast('请至少选择一个单元', 'error'); return; }
+  var unitIds = Array.from(unitCbs).map(cb => cb.value);
+
+  // Build API URL
+  var params = new URLSearchParams();
+  params.set('scope', scopeVal);
+  params.set('mode', focusMode);
+  unitIds.forEach(function(id) { params.append('units', id); });
+
+  try {
+    var res = await VOCAB_API.get('/api/learn-words/?' + params.toString());
+    focusWords = res.words || [];
+
+    if (focusWords.length === 0) {
+      showToast('没有符合条件的单词', 'error');
+      return;
+    }
+
+    focusIndex = 0;
+    sessionStats = { total: 0, mastered: 0, unknown: 0 };
+    sessionCompleted = false;
+    isFlipped = false;
+    focusSaveState();
+
+    focusEnterSession();
+
+    // Request fullscreen
+    try {
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen();
+      }
+    } catch (e) {}
+
+    focusRender();
+  } catch (e) {
+    showToast('加载单词失败', 'error');
+  }
+}
+
+// ===== Render Current Word =====
+function focusRender() {
+  if (focusIndex >= focusWords.length) {
+    focusShowComplete();
+    return;
+  }
+
+  var word = focusWords[focusIndex];
+  isFlipped = false;
+
+  if (focusMode === 'cover_en') {
+    document.getElementById('focusWord').textContent = '???';
+  } else {
+    document.getElementById('focusWord').textContent = word.word;
+  }
+  document.getElementById('focusDetails').style.display = 'none';
+
+  document.getElementById('focusCounter').textContent = (focusIndex + 1) + ' / ' + focusWords.length;
+  document.getElementById('focusProgress').style.width = ((focusIndex) / focusWords.length * 100) + '%';
+
+  // Auto speak
+  if (word.word && focusMode !== 'cover_en') {
+    setTimeout(function () { speak(word.word); }, 200);
+  }
+
+  focusSaveState();
+}
+
+// ===== Flip Card =====
+function focusFlip() {
+  if (sessionCompleted) return;
+  if (focusIndex >= focusWords.length) return;
+
+  var word = focusWords[focusIndex];
+  var details = document.getElementById('focusDetails');
+
+  if (isFlipped) {
+    details.style.display = 'none';
+    if (focusMode === 'cover_en') {
+      document.getElementById('focusWord').textContent = '???';
+    } else {
+      document.getElementById('focusWord').textContent = word.word;
+    }
+    isFlipped = false;
+  } else {
+    document.getElementById('focusPhonetic').textContent = word.phonetic_us || '';
+    document.getElementById('focusPos').textContent = word.pos || '';
+    document.getElementById('focusMeaning').textContent = Array.isArray(word.meanings) ? word.meanings.join('；') : (word.meanings || '');
+    document.getElementById('focusExample').textContent = '';
+    details.style.display = 'block';
+
+    if (focusMode === 'cover_en') {
+      document.getElementById('focusWord').textContent = word.word;
+    }
+
+    isFlipped = true;
+  }
+}
+
+// ===== Mark Word =====
+async function focusMark(action) {
+  if (sessionCompleted || focusIndex >= focusWords.length) return;
+
+  var word = focusWords[focusIndex];
+
+  try {
+    await VOCAB_API.post('/api/mark/' + action + '/' + word.id + '/');
+    sessionStats.total++;
+    if (action === 'mastered') sessionStats.mastered++;
+    else if (action === 'unknown') sessionStats.unknown++;
+    focusSaveState();
+
+    document.getElementById('focusProgress').style.width = ((focusIndex + 1) / focusWords.length * 100) + '%';
+    focusNext();
+  } catch (e) {
+    showToast('标记失败', 'error');
+  }
+}
+
+// ===== Navigation =====
+function focusNext() {
+  focusIndex++;
+  if (focusIndex >= focusWords.length) {
+    focusShowComplete();
+  } else {
+    focusRender();
+  }
+}
+
+function focusPrev() {
+  if (focusIndex > 0) {
+    focusIndex--;
+    focusRender();
+  }
+}
+
+// ===== Complete =====
+function focusShowComplete() {
+  sessionCompleted = true;
+  document.getElementById('focusWord').textContent = '完成！';
+  document.getElementById('focusDetails').style.display = 'none';
+  document.getElementById('focusProgress').style.width = '100%';
+  document.getElementById('focusCounter').textContent = focusWords.length + ' / ' + focusWords.length;
+  document.getElementById('focusComplete').classList.remove('hidden');
+  document.getElementById('focusSummary').textContent =
+    '共 ' + sessionStats.total + ' 个单词 | 会 ' + sessionStats.mastered +
+      ' | 不会 ' + sessionStats.unknown;
+  focusSaveState();
+
+  try {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    }
+  } catch (e) {}
+}
+
+// ===== Reset =====
+function focusReset() {
+  focusClearState();
+  document.getElementById('focusSetup').classList.remove('hidden');
+  document.getElementById('focusSession').classList.add('hidden');
+  document.getElementById('focusComplete').classList.add('hidden');
+  focusWords = [];
+  focusIndex = 0;
+  sessionCompleted = false;
+  sessionStats = { total: 0, mastered: 0, unknown: 0 };
+}
+
+// ===== TTS =====
+function speak(text) { window.VOCAB_SPEAK(text); }
+function replayFocusAudio() {
+  if (focusWords.length > 0 && focusIndex < focusWords.length) speak(focusWords[focusIndex].word);
+}
+
+// ===== Keyboard Shortcuts =====
+document.addEventListener('keydown', function (e) {
+  var sessionEl = document.getElementById('focusSession');
+  if (!sessionEl || sessionEl.classList.contains('hidden')) return;
+
+  switch (e.key) {
+    case ' ':
+      e.preventDefault();
+      focusFlip();
+      break;
+    case '1':
+      focusMark('mastered');
+      break;
+    case '2':
+      focusMark('unknown');
+      break;
+    case 'ArrowRight':
+      focusNext();
+      break;
+    case 'ArrowLeft':
+      focusPrev();
+      break;
+    case 'Escape':
+      e.preventDefault();
+      try {
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        }
+      } catch (e) {}
+      focusReset();
+      break;
+  }
+});
+
+// ===== Click card to flip =====
+document.getElementById('focusCard').addEventListener('click', function (e) {
+  if (e.target.tagName === 'BUTTON') return;
+  focusFlip();
+});
+
+// ===== 刷新后恢复专注进度（保留当前页，数据重新获取）=====
+if (focusRestoreState()) {
+  focusEnterSession();
+  if (!sessionCompleted && focusWords.length > 0) {
+    // 数据重新校验：重新从服务端拉取单词，避免状态过期
+    var scopeVal = 'unknown';
+    var scopeRadio = document.querySelector('input[name="focusScope"]:checked');
+    if (scopeRadio) scopeVal = scopeRadio.value;
+    var modeRadio = document.querySelector('input[name="focusMode"]:checked');
+    if (modeRadio) focusMode = modeRadio.value;
+    var params = new URLSearchParams();
+    params.set('scope', scopeVal);
+    params.set('mode', focusMode);
+    focusWords.forEach(function (w) { params.append('units', w.unit_number); });
+    VOCAB_API.get('/api/learn-words/?' + params.toString()).then(function (res) {
+      if (res.words && res.words.length > 0) {
+        focusWords = res.words;
+        focusSaveState();
+        focusRender();
+      }
+    }).catch(function () {});
+  }
+}
+</script>
+{% endblock %}

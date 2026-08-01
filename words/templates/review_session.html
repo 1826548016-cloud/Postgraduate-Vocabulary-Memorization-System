@@ -1,0 +1,389 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}复习中 - 考研单词背诵系统{% endblock %}
+{% block page_title %}复习中{% endblock %}
+
+{% block extra_head %}
+<style>
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin: 24px 0;
+  }
+  .summary-card {
+    text-align: center;
+    padding: 16px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius);
+  }
+  .summary-value {
+    font-size: var(--font-2xl);
+    font-weight: 700;
+  }
+  .summary-label {
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+  }
+  .review-meta {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+  }
+  .review-meta-item {
+    background: var(--bg-secondary);
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+  }
+  .progress-bar-fill.review {
+    background: #7c3aed;
+  }
+  .word-meaning, .word-example {
+    white-space: pre-line;
+  }
+  /* Ebbinghaus curve */
+  .curve-container {
+    margin: 24px auto 0;
+    max-width: 500px;
+    padding: 16px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius);
+  }
+  .curve-title {
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    text-align: center;
+  }
+  .curve-track {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 6px;
+    height: 100px;
+    padding: 0 12px;
+  }
+  .curve-bar {
+    width: 40px;
+    background: #e2e8f0;
+    border-radius: 4px 4px 0 0;
+    position: relative;
+    transition: background 0.3s;
+    cursor: default;
+  }
+  [data-theme="dark"] .curve-bar { background: #334155; }
+  .curve-bar.active {
+    background: #7c3aed;
+  }
+  .curve-bar.passed {
+    background: #059669;
+  }
+  .curve-label {
+    position: absolute;
+    bottom: -22px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.6rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  .curve-days {
+    position: absolute;
+    top: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.65rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .curve-bar.active .curve-days { color: #7c3aed; }
+  .curve-bar.passed .curve-days { color: #059669; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+{% if review_count == 0 %}
+<div class="card text-center" style="padding: 48px 24px;">
+  <div style="font-size: 3rem; margin-bottom: 16px;">🎉</div>
+  <div style="font-size: var(--font-xl); font-weight: 600; margin-bottom: 8px;">
+    当前没有需要复习的单词
+  </div>
+  <p class="text-secondary" style="margin-bottom: 24px;">
+    所有单词都在按艾宾浩斯遗忘曲线安排中，请到时间再来复习
+  </p>
+  <a href="{% url 'words:dashboard' %}" class="btn btn-primary">返回仪表盘</a>
+</div>
+{% else %}
+<div class="card mb-4">
+  <div class="flex justify-between items-center gap-4 mb-4">
+    <div class="text-secondary text-sm">
+      <span>复习进度：</span>
+      <span id="progressText">1 / {{ review_count }}</span>
+    </div>
+    <span class="badge badge-reviewing">复习</span>
+  </div>
+  <div class="progress-bar">
+    <div id="progressFill" class="progress-bar-fill review" style="width: 0%;"></div>
+  </div>
+</div>
+
+<div id="wordCard" class="card word-card">
+  <div id="wordText" class="word-text">加载中…</div>
+  <button id="speakBtn" class="btn btn-secondary btn-sm" title="发音" style="margin-bottom: 12px;">🔊 发音</button>
+  <div id="wordPhonetic" class="word-phonetic">—</div>
+  <div id="wordPos" class="word-pos">—</div>
+
+  <div class="review-meta">
+    <div class="review-meta-item" id="levelBadge">掌握等级：L0</div>
+    <div class="review-meta-item" id="errorBadge">历史错误：0</div>
+    <div class="review-meta-item" id="intervalBadge">下次间隔：1天</div>
+  </div>
+
+  <div id="wordMeaning" class="word-meaning hidden">—</div>
+  <div id="wordExample" class="word-example hidden">—</div>
+
+  <div class="word-card-actions">
+    <button id="revealBtn" class="btn btn-primary btn-lg">显示释义 <span class="text-sm">(空格)</span></button>
+  </div>
+
+  <div class="word-card-actions">
+    <button data-action="mastered" class="mark-btn btn btn-primary btn-lg">会 <span class="text-sm">(1)</span></button>
+    <button data-action="unknown" class="mark-btn btn btn-danger btn-lg">不会 <span class="text-sm">(2)</span></button>
+  </div>
+
+  <div class="flex justify-center gap-4 mt-6">
+    <button id="prevBtn" class="btn btn-secondary">上一词 <span class="text-sm">(←)</span></button>
+    <button id="nextBtn" class="btn btn-secondary">下一词 <span class="text-sm">(→)</span></button>
+  </div>
+
+  <!-- Ebbinghaus Curve -->
+  <div class="curve-container">
+    <div class="curve-title">
+      艾宾浩斯复习曲线 <span id="curveHint">— 当前词处于 L0 级</span>
+    </div>
+    <div class="curve-track" id="curveTrack">
+      <div class="curve-bar" data-lv="0" style="height: 100px;"><span class="curve-days">1天</span><span class="curve-label">L0</span></div>
+      <div class="curve-bar" data-lv="1" style="height: 80px;"><span class="curve-days">2天</span><span class="curve-label">L1</span></div>
+      <div class="curve-bar" data-lv="2" style="height: 60px;"><span class="curve-days">4天</span><span class="curve-label">L2</span></div>
+      <div class="curve-bar" data-lv="3" style="height: 40px;"><span class="curve-days">7天</span><span class="curve-label">L3</span></div>
+      <div class="curve-bar" data-lv="4" style="height: 25px;"><span class="curve-days">15天</span><span class="curve-label">L4</span></div>
+      <div class="curve-bar" data-lv="5" style="height: 18px;"><span class="curve-days">30天</span><span class="curve-label">掌握</span></div>
+    </div>
+  </div>
+</div>
+
+<div id="completionCard" class="card word-card hidden">
+  <div class="card-header">🎉 复习完成</div>
+  <p class="text-secondary">本次共复习 <strong>{{ review_count }}</strong> 个单词</p>
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div id="masteredCount" class="summary-value text-accent">0</div>
+      <div class="summary-label">会</div>
+    </div>
+    <div class="summary-card">
+      <div id="unknownCount" class="summary-value">0</div>
+      <div class="summary-label">不会</div>
+    </div>
+  </div>
+  <p class="text-secondary" style="margin-bottom: 16px;" id="completionMsg"></p>
+  <a href="{% url 'words:dashboard' %}" class="btn btn-primary btn-lg">返回仪表盘</a>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+  var reviewCount = {{ review_count }};
+  var wordsData = {{ words_json|safe }};
+  // Restore index from sessionStorage (survives page refresh)
+  var savedIndex = sessionStorage.getItem('vocab-review-idx');
+  var currentIndex = (savedIndex !== null) ? parseInt(savedIndex) : 0;
+  if (currentIndex >= reviewCount) currentIndex = 0;
+  var currentWord = null;
+  var revealed = false;
+
+  // Ebbinghaus intervals: L0=1, L1=2, L2=4, L3=7, L4=15, L5=30
+  var intervals = [1, 2, 4, 7, 15, 30];
+
+  var counts = { mastered: 0, unknown: 0 };
+  // Restore counts so refresh keeps 会/不会统计
+  try {
+    var savedCounts = JSON.parse(sessionStorage.getItem('vocab-review-counts') || 'null');
+    if (savedCounts) {
+      counts.mastered = savedCounts.mastered || 0;
+      counts.unknown = savedCounts.unknown || 0;
+    }
+  } catch (e) {}
+
+  var els = {
+    progressText: document.getElementById('progressText'),
+    progressFill: document.getElementById('progressFill'),
+    wordCard: document.getElementById('wordCard'),
+    wordText: document.getElementById('wordText'),
+    wordPhonetic: document.getElementById('wordPhonetic'),
+    wordPos: document.getElementById('wordPos'),
+    wordMeaning: document.getElementById('wordMeaning'),
+    wordExample: document.getElementById('wordExample'),
+    revealBtn: document.getElementById('revealBtn'),
+    completionCard: document.getElementById('completionCard'),
+    masteredCount: document.getElementById('masteredCount'),
+    unknownCount: document.getElementById('unknownCount'),
+    levelBadge: document.getElementById('levelBadge'),
+    errorBadge: document.getElementById('errorBadge'),
+    intervalBadge: document.getElementById('intervalBadge'),
+    curveHint: document.getElementById('curveHint'),
+    curveTrack: document.getElementById('curveTrack'),
+    completionMsg: document.getElementById('completionMsg'),
+  };
+
+  function updateProgress() {
+    var pct = reviewCount > 0 ? ((currentIndex + 1) / reviewCount * 100) : 0;
+    els.progressText.textContent = (currentIndex + 1) + ' / ' + reviewCount;
+    els.progressFill.style.width = pct + '%';
+  }
+
+  function updateCurveBar(level) {
+    var bars = els.curveTrack.querySelectorAll('.curve-bar');
+    bars.forEach(function (bar) {
+      var lv = parseInt(bar.dataset.lv);
+      bar.classList.remove('active', 'passed');
+      if (lv < level) bar.classList.add('passed');
+      if (lv === level) bar.classList.add('active');
+    });
+    els.curveHint.textContent = '— 当前词处于 L' + level + ' 级';
+  }
+
+  function speakWord(text) { window.VOCAB_SPEAK(text); }
+  function replayAudio() { if (currentWord) speakWord(currentWord.word); }
+
+  function formatMeanings(meanings) {
+    if (!meanings) return '';
+    if (Array.isArray(meanings)) {
+      return meanings.map(function (m, i) { return (i + 1) + '. ' + m; }).join('\n');
+    }
+    return String(meanings);
+  }
+
+  function renderWord(word) {
+    currentWord = word;
+    revealed = false;
+    sessionStorage.setItem('vocab-review-idx', currentIndex);
+
+    var lv = word.mastery_level || 0;
+    var err = word.error_count || 0;
+
+    els.wordText.textContent = word.word || '';
+    els.wordPhonetic.textContent = word.phonetic_us || '';
+    els.wordPos.textContent = word.pos || '';
+    els.wordMeaning.textContent = formatMeanings(word.meanings);
+    els.wordExample.textContent = (word.example_en || '') + '\n' + (word.example_zh || '');
+
+    els.levelBadge.textContent = '掌握等级：L' + lv;
+    els.errorBadge.textContent = '历史错误：' + err;
+    els.intervalBadge.textContent = '下次间隔：' + intervals[lv] + '天';
+
+    els.wordMeaning.classList.add('hidden');
+    els.wordExample.classList.add('hidden');
+    els.revealBtn.textContent = '显示释义 (空格键)';
+    els.revealBtn.disabled = false;
+
+    updateProgress();
+    updateCurveBar(lv);
+    speakWord(word.word || '');
+  }
+
+  function reveal() {
+    if (revealed) return;
+    revealed = true;
+    els.wordMeaning.classList.remove('hidden');
+    els.wordExample.classList.remove('hidden');
+    els.revealBtn.textContent = '已显示';
+    els.revealBtn.disabled = true;
+  }
+
+  function mark(action) {
+    if (!currentWord) return;
+    counts[action] = (counts[action] || 0) + 1;
+    sessionStorage.setItem('vocab-review-counts', JSON.stringify(counts));
+
+    VOCAB_API.post('/api/mark/' + action + '/' + currentWord.id + '/', {})
+      .then(function () { advance(); })
+      .catch(function (err) {
+        if (typeof showToast === 'function') showToast('标记失败', 'error');
+      });
+  }
+
+  function advance() {
+    if (currentIndex >= reviewCount - 1) {
+      showCompletion();
+      return;
+    }
+    currentIndex += 1;
+    renderWord(wordsData[currentIndex]);
+  }
+
+  function goPrev() {
+    if (currentIndex <= 0) return;
+    currentIndex -= 1;
+    renderWord(wordsData[currentIndex]);
+  }
+
+  function goNext() {
+    advance();
+  }
+
+  function showCompletion() {
+    els.wordCard.classList.add('hidden');
+    els.completionCard.classList.remove('hidden');
+    els.masteredCount.textContent = counts.mastered;
+    els.unknownCount.textContent = counts.unknown;
+    sessionStorage.removeItem('vocab-review-idx');
+    sessionStorage.removeItem('vocab-review-counts');
+
+    var msg = '';
+    if (counts.mastered >= reviewCount * 0.8) {
+      msg = '太棒了！你已经掌握了大部分单词，继续保持！';
+    } else if (counts.unknown > reviewCount * 0.3) {
+      msg = '不少单词不太熟悉，建议重新背诵这些单词的基础释义。';
+    } else {
+      msg = '复习完成，下次按时再来复习效果更好！';
+    }
+    els.completionMsg.textContent = msg;
+  }
+
+  // Button bindings
+  els.revealBtn.addEventListener('click', reveal);
+  document.getElementById('speakBtn').addEventListener('click', replayAudio);
+  document.getElementById('prevBtn').addEventListener('click', goPrev);
+  document.getElementById('nextBtn').addEventListener('click', goNext);
+  document.querySelectorAll('.mark-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () { mark(btn.dataset.action); });
+  });
+
+  // Keyboard
+  document.addEventListener('keydown', function (e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    switch (e.code) {
+      case 'Space': e.preventDefault(); reveal(); break;
+      case 'Digit1': case 'Numpad1': e.preventDefault(); mark('mastered'); break;
+      case 'Digit2': case 'Numpad2': e.preventDefault(); mark('unknown'); break;
+      case 'ArrowLeft': e.preventDefault(); goPrev(); break;
+      case 'ArrowRight': e.preventDefault(); goNext(); break;
+    }
+  });
+
+  // Init (restored currentIndex, not always 0)
+  if (reviewCount > 0) {
+    renderWord(wordsData[currentIndex]);
+  }
+})();
+</script>
+{% endblock %}
