@@ -99,7 +99,7 @@
 <div class="card" id="ai-models" style="margin-bottom: 24px; scroll-margin-top: 16px;">
   <div class="card-header">AI 模型</div>
   <div class="text-sm text-secondary" style="margin: 4px 0 12px;">
-    <p style="margin: 0 0 4px;">集中管理用于 <strong>AI 单词导入（图片 / 文本 / 文件识别）、AI 复审、速记生成</strong> 的模型，配置保存在数据库中。识别与速记功能会自动使用「已启用」的模型。</p>
+    <p style="margin: 0 0 4px;">集中管理用于 <strong>AI 单词导入（图片 / 文本 / 文件识别）、AI 复审、速记生成、小助手问答</strong> 的模型，配置保存在数据库中。未单独指定时，各功能会自动使用「已启用」的模型。</p>
   </div>
 
   <div class="flex justify-between items-center" style="margin-bottom: 12px;">
@@ -108,6 +108,19 @@
   </div>
 
   <div id="modelList" class="flex flex-col" style="gap: 8px;"></div>
+
+  <!-- 小助手模型 -->
+  <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--c-border-light);">
+    <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 10px;">
+      <div>
+        <div style="font-weight: 500;"><i class="ph ph-chat-circle-text" style="color: var(--c-green);"></i> 小助手模型</div>
+        <div class="text-sm text-secondary">背诵 / 专注 / 复习中小助手问答使用的模型，切换后立即生效</div>
+      </div>
+      <select id="assistantModelSelect" class="form-input" style="min-width: 240px;" onchange="saveAssistantModel(this.value)">
+        <option value="">自动（使用第一个启用的模型）</option>
+      </select>
+    </div>
+  </div>
 </div>
 
 <!-- Data Management -->
@@ -136,6 +149,14 @@
 
     <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 12px;">
       <div>
+        <div style="font-weight: 500;">小助手对话记录</div>
+        <div class="text-sm text-secondary">清空背诵 / 专注 / 复习中小助手的全部聊天记录</div>
+      </div>
+      <button class="btn btn-danger" onclick="clearAssistantHistory()">清空对话</button>
+    </div>
+
+    <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 12px;">
+      <div>
         <div style="font-weight: 500; color: #ef4444;">重置学习进度</div>
         <div class="text-sm text-secondary">清空所有学习进度、打卡记录和会话数据（单词数据保留）</div>
       </div>
@@ -148,10 +169,10 @@
 <div class="card">
   <div class="card-header">关于</div>
   <div class="text-secondary">
-    <p>考研单词背诵系统 v1.5</p>
+    <p>考研单词背诵系统 v1.5.2</p>
     <p>基于艾宾浩斯遗忘曲线的智能背单词应用</p>
     <p>技术栈：Django + Chart.js + Browser TTS</p>
-    <p>最后更新于：2026年8月1日晚十一点</p>
+    <p>最后更新于：2026年8月2日</p>
     <p>声明：仅用于学习和研究，不涉及任何商业用途。</p>
   </div>
 </div>
@@ -373,6 +394,23 @@ async function restoreData(input) {
   }
 }
 
+// ===== 小助手对话记录 =====
+async function clearAssistantHistory() {
+  if (!confirm('确定要清空小助手的全部聊天记录吗？\n\n此操作将删除背诵 / 专注 / 复习中小助手的全部对话历史。')) {
+    return;
+  }
+  try {
+    var res = await VOCAB_API.del('/api/assistant/');
+    if (res.success) {
+      showToast('对话记录已清空', 'success');
+    } else {
+      showToast(res.error || '清空失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
+}
+
 // ===== Reset =====
 async function doResetConfirm() {
   if (!confirm('确定要重置所有学习进度吗？\n\n此操作将清空所有学习进度和打卡记录。单词数据会被保留，但学习进度不可恢复。\n\n建议先备份数据。')) {
@@ -489,12 +527,36 @@ function loadAIModels() {
   return VOCAB_API.get('/api/ai-models/').then(function (res) {
     aiModels = (res && res.models) || [];
     renderModelList();
+    loadAssistantModel();
     return aiModels;
   }).catch(function () {
     aiModels = [];
     renderModelList();
     return aiModels;
   });
+}
+
+// ===== 小助手模型 =====
+function loadAssistantModel() {
+  return VOCAB_API.get('/api/assistant/model/').then(function (res) {
+    var sel = document.getElementById('assistantModelSelect');
+    if (!sel) return;
+    var opts = '<option value="">自动（使用第一个启用的模型）</option>';
+    aiModels.forEach(function (m) {
+      var name = m.display_name || m.model_id;
+      opts += '<option value="' + m.id + '"' + (m.enabled ? '' : ' disabled') + '>'
+        + name + (m.enabled ? '' : '（已禁用）') + '</option>';
+    });
+    sel.innerHTML = opts;
+    sel.value = res.assistant_model_id ? String(res.assistant_model_id) : '';
+  }).catch(function () {});
+}
+
+function saveAssistantModel(val) {
+  VOCAB_API.post('/api/assistant/model/', { model_id: val || null }).then(function (res) {
+    if (res.success) showToast('小助手模型已更新', 'success');
+    else showToast(res.error || '保存失败', 'error');
+  }).catch(function () { showToast('请求失败', 'error'); });
 }
 
 function renderModelList() {

@@ -29,7 +29,6 @@ urlpatterns = [
     path('api/progress/reset/', views.api_reset_progress, name='api_reset_progress'),
     path('api/plan/create/', views.api_plan_create, name='api_plan_create'),
     path('api/plan/update/<int:plan_id>/', views.api_plan_update, name='api_plan_update'),
-    path('api/checkin/', views.api_checkin, name='api_checkin'),
     path('api/stats/<str:period>/', views.api_stats, name='api_stats'),
     path('api/export/pdf/', views.api_export_pdf, name='api_export_pdf'),
     path('api/backup/', views.api_backup, name='api_backup'),
@@ -54,6 +53,8 @@ urlpatterns = [
     path('api/ai/export-pdf/', views.api_ai_export_pdf, name='api_ai_export_pdf'),
     path('api/ai/test/', views.api_ai_test, name='api_ai_test'),
     path('api/ai-models/', views.api_ai_models, name='api_ai_models'),
+    path('api/assistant/', views.api_assistant, name='api_assistant'),
+    path('api/assistant/model/', views.api_assistant_model, name='api_assistant_model'),
     path('api/exam/words/', views.api_exam_words, name='api_exam_words'),
     path('api/exam/submit/', views.api_exam_submit, name='api_exam_submit'),
 ]

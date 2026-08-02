@@ -97,7 +97,11 @@
     <!-- Word Card -->
     <div class="card word-card" id="focusCard" style="cursor: pointer; min-width: 300px; max-width: 600px; width: 100%;">
       <div class="word-text" id="focusWord" style="margin-bottom: 8px;">-</div>
-      <button class="btn btn-secondary btn-sm" onclick="replayFocusAudio()" title="发音" style="margin-bottom: 16px;"><i class="ph ph-speaker-high"></i> 发音</button>
+      <div class="flex gap-2 items-center" style="margin-bottom: 16px; justify-content: center;">
+        <button class="btn btn-secondary btn-sm" onclick="replayFocusAudio()" title="发音"><i class="ph ph-speaker-high"></i> 发音</button>
+        <button id="noteBtn" class="btn btn-secondary btn-sm" title="记笔记 / 查看笔记"><i class="ph ph-note-pencil"></i> 笔记</button>
+        <button id="quickMemoryBtn" class="btn btn-secondary btn-sm" title="AI 速记 / 查看速记"><i class="ph ph-lightning"></i> 速记</button>
+      </div>
       <div id="focusDetails" style="display: none;">
         <div class="word-phonetic" id="focusPhonetic" style="margin-bottom: 8px;"></div>
         <div class="word-pos" id="focusPos" style="margin-bottom: 4px;"></div>
@@ -105,6 +109,12 @@
         <div class="word-example" id="focusExample" style="margin-top: 16px;"></div>
       </div>
       <div class="text-secondary text-sm" style="margin-top: 24px;">点击卡片或按空格翻转</div>
+
+      <!-- 笔记 / 速记 展开区（共享组件） -->
+      {% include '_word_ext_panel.html' %}
+
+      <!-- 小助手（共享组件，对话历史互通） -->
+      {% include '_assistant_panel.html' %}
     </div>
 
     <!-- Action Buttons -->
@@ -135,6 +145,8 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<script src="{% static 'js/word_ext.js' %}"></script>
+<script src="{% static 'js/assistant.js' %}"></script>
 <script>
 // ===== Unit selection helpers =====
 const focusUnitWordCounts = {
@@ -272,6 +284,9 @@ function focusRender() {
   var word = focusWords[focusIndex];
   isFlipped = false;
 
+  // 切换单词时收起笔记/速记展开区
+  if (window.WordExtPanel) WordExtPanel.closeExtPanel();
+
   if (focusMode === 'cover_en') {
     document.getElementById('focusWord').textContent = '???';
   } else {
@@ -402,6 +417,18 @@ document.addEventListener('keydown', function (e) {
   var sessionEl = document.getElementById('focusSession');
   if (!sessionEl || sessionEl.classList.contains('hidden')) return;
 
+  // 笔记/速记展开时：仅 ESC 收起，其余按键不响应
+  if (window.WordExtPanel && WordExtPanel.isOpen()) {
+    if (e.key === 'Escape') WordExtPanel.closeExtPanel();
+    return;
+  }
+  // 小助手打开时：仅 ESC 收起，其余按键不响应
+  if (window.AssistantPanel && AssistantPanel.isOpen()) {
+    if (e.key === 'Escape') AssistantPanel.close();
+    return;
+  }
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+
   switch (e.key) {
     case ' ':
       e.preventDefault();
@@ -433,9 +460,27 @@ document.addEventListener('keydown', function (e) {
 
 // ===== Click card to flip =====
 document.getElementById('focusCard').addEventListener('click', function (e) {
-  if (e.target.tagName === 'BUTTON') return;
+  var t = e.target;
+  if (t.tagName === 'BUTTON' || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'A' || t.tagName === 'SELECT') return;
+  if (t.closest && (t.closest('#wordExtPanel') || t.closest('#assistantPanel'))) return;
   focusFlip();
 });
+
+// ===== 初始化笔记 / 速记共享组件 =====
+if (window.WordExtPanel) {
+  WordExtPanel.init({
+    getCurrentWord: function () { return focusWords[focusIndex] || null; },
+    aiSettingsUrl: "{% url 'words:settings_page' %}#ai-models"
+  });
+}
+
+// ===== 初始化小助手共享组件 =====
+if (window.AssistantPanel) {
+  AssistantPanel.init({
+    getCurrentWord: function () { return focusWords[focusIndex] || null; },
+    aiSettingsUrl: "{% url 'words:settings_page' %}#ai-models"
+  });
+}
 
 // ===== 刷新后恢复专注进度（保留当前页，数据重新获取）=====
 if (focusRestoreState()) {

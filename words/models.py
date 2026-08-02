@@ -290,6 +290,8 @@ class UserSettings(models.Model):
         default='us', verbose_name='发音类型')
     daily_new_target = models.IntegerField(default=30, verbose_name='每日新词目标')
     daily_review_target = models.IntegerField(default=50, verbose_name='每日复习目标')
+    assistant_model = models.ForeignKey('AIModel', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='+', verbose_name='小助手模型')
 
     class Meta:
         verbose_name = '用户设置'
@@ -304,6 +306,26 @@ class UserSettings(models.Model):
         if not settings:
             settings = cls.objects.create()
         return settings
+
+
+class ChatMessage(models.Model):
+    """小助手对话记录：背诵/专注/复习三个模式共用同一条对话，历史持久化保存"""
+    ROLE_CHOICES = [
+        ('user', '用户'),
+        ('assistant', '小助手'),
+    ]
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, verbose_name='角色')
+    content = models.TextField(verbose_name='内容')
+    word_id = models.IntegerField(null=True, blank=True, verbose_name='关联单词 ID')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        ordering = ['id']
+        verbose_name = '小助手对话'
+        verbose_name_plural = '小助手对话'
+
+    def __str__(self):
+        return f'{self.role}: {self.content[:30]}'
 
 
 class AIModel(models.Model):

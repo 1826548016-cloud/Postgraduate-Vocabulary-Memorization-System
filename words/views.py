@@ -17,9 +17,11 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from .models import (Unit, Word, StudyProgress, StudyPlan,
-                     DailyCheckIn, Favorite, Note, QuickMemory, AIModel, StudySession, UserSettings)
+                     DailyCheckIn, Favorite, Note, QuickMemory, AIModel, StudySession, UserSettings, ChatMessage)
 
 # ─── 帮助函数 ───────────────────────────────────────────────
+
+CHECKIN_DAILY_WORDS = 30  # 每日学习满 30 词自动打卡
 
 def update_daily_checkin():
     """更新今日打卡统计数据；今日背诵满 30 词自动打卡，返回是否刚刚自动打卡"""
@@ -35,7 +37,7 @@ def update_daily_checkin():
     else:
         checkin.correct_rate = 0
     auto_checked = False
-    if not checkin.is_checked and (checkin.new_words_learned + checkin.words_reviewed) >= 30:
+    if not checkin.is_checked and (checkin.new_words_learned + checkin.words_reviewed) >= CHECKIN_DAILY_WORDS:
         checkin.is_checked = True
         auto_checked = True
     checkin.save()
@@ -89,6 +91,10 @@ def dashboard(request):
     streak = get_streak()
     today_checkin = DailyCheckIn.objects.filter(date=today).first()
 
+    checkin_words = today_new + today_review
+    checkin_threshold = CHECKIN_DAILY_WORDS
+    checkin_percent = min(100, round(checkin_words / checkin_threshold * 100)) if checkin_threshold else 0
+
     context = {
         'today_new': today_new,
         'today_review': today_review,
@@ -101,6 +107,9 @@ def dashboard(request):
         'category_stats': category_stats,
         'streak': streak,
         'today_checkin': today_checkin,
+        'checkin_words': checkin_words,
+        'checkin_threshold': checkin_threshold,
+        'checkin_percent': checkin_percent,
     }
     return render(request, 'dashboard.html', context)
 
@@ -187,14 +196,21 @@ def learn_session(request):
 
 def review_session(request):
     today = timezone.localdate()
-    words = Word.objects.filter(
-        progress__next_review__lte=today,
-        progress__status__in=['learning', 'reviewing']
-    ).order_by('progress__next_review')
+    settings_obj = UserSettings.get_settings()
+
+    # 今日到期单词（含昨天未复习完顺延下来的），按到期时间排序，旧的优先
+    due_progress = StudyProgress.objects.filter(
+        next_review__lte=today,
+        status__in=['learning', 'reviewing']
+    ).select_related('word').order_by('next_review')
+    total_due = due_progress.count()
+
+    # 每日固定一批，数量取「每日复习目标」，未复习完的自动顺延到后面的批次
+    batch = due_progress[:settings_obj.daily_review_target]
 
     word_data = []
-    for w in words:
-        p = getattr(w, 'progress', None)
+    for p in batch:
+        w = p.word
         word_data.append({
             'id': w.id,
             'word': w.word,
@@ -203,14 +219,20 @@ def review_session(request):
             'meanings': w.get_meanings(),
             'example_en': w.example_en,
             'example_zh': w.example_zh,
-            'mastery_level': p.mastery_level if p else 0,
-            'error_count': p.error_count if p else 0,
-            'next_review': p.next_review.isoformat() if p and p.next_review else '',
+            'mastery_level': p.mastery_level,
+            'error_count': p.error_count,
+            'next_review': p.next_review.isoformat() if p.next_review else '',
         })
+
+    remaining_due = max(0, total_due - len(word_data))
 
     return render(request, 'review_session.html', {
         'review_count': len(word_data),
         'words_json': json.dumps(word_data, ensure_ascii=False),
+        'total_due': total_due,
+        'remaining_due': remaining_due,
+        'daily_review_target': settings_obj.daily_review_target,
+        'batch_date': today.isoformat(),
     })
 
 
@@ -589,20 +611,6 @@ def api_plan_delete(request, plan_id):
         return JsonResponse({'error': str(e)}, status=400)
 
 
-@csrf_exempt
-@require_http_methods(['POST'])
-def api_checkin(request):
-    today = timezone.localdate()
-    checkin, _ = DailyCheckIn.objects.get_or_create(date=today)
-    checkin.is_checked = True
-    update_daily_checkin()
-    checkin.new_words_learned = DailyCheckIn.objects.get(date=today).new_words_learned
-    checkin.words_reviewed = DailyCheckIn.objects.get(date=today).words_reviewed
-    checkin.save()
-    streak = get_streak()
-    return JsonResponse({'success': True, 'is_checked': True, 'streak': streak})
-
-
 def api_stats(request, period):
     today = timezone.localdate()
     if period == '7':
@@ -614,24 +622,40 @@ def api_stats(request, period):
 
     checkins = DailyCheckIn.objects.filter(
         date__gte=start_date, date__lte=today
-    ).order_by('date')
+    )
+    checkin_map = {c.date: c for c in checkins}
 
+    # 每日新学/复习数据按进度实时统计（不依赖打卡快照），保证近几天数据完整
+    new_by_day = StudyProgress.objects.filter(
+        learned_date__gte=start_date, is_today_new=True
+    ).values('learned_date').annotate(cnt=Count('id'))
+    new_map = {x['learned_date']: x['cnt'] for x in new_by_day}
+
+    review_by_day = StudyProgress.objects.filter(
+        last_review__date__gte=start_date, review_count__gt=0
+    ).values('last_review__date').annotate(cnt=Count('id'))
+    review_map = {x['last_review__date']: x['cnt'] for x in review_by_day}
+
+    # 连续日期序列：无学习记录的日期补 0，保证趋势图覆盖整个周期（含今天）
     days_data = []
-    for c in checkins:
+    d = start_date
+    while d <= today:
+        c = checkin_map.get(d)
         days_data.append({
-            'date': c.date.isoformat(),
-            'new_words': c.new_words_learned,
-            'reviewed': c.words_reviewed,
-            'duration': c.study_duration,
-            'correct_rate': c.correct_rate,
+            'date': d.isoformat(),
+            'new_words': new_map.get(d, 0),
+            'reviewed': review_map.get(d, 0),
+            'duration': c.study_duration if c else 0,
+            'correct_rate': c.correct_rate if c else 0,
         })
+        d += timedelta(days=1)
 
     summary = checkins.aggregate(
-        total_new=Sum('new_words_learned'),
-        total_reviewed=Sum('words_reviewed'),
         avg_correct=Avg('correct_rate'),
         total_duration=Sum('study_duration'),
     )
+    summary['total_new'] = sum(x['new_words'] for x in days_data)
+    summary['total_reviewed'] = sum(x['reviewed'] for x in days_data)
 
     # 易错词
     error_words = StudyProgress.objects.select_related('word').filter(
@@ -790,7 +814,7 @@ def api_backup(request):
     settings_obj = UserSettings.get_settings()
     data = {
         'version': '1.0',
-        'exported_at': timezone.now().isoformat(),
+        'exported_at': timezone.localtime().isoformat(),
         'settings': {
             'font_size': settings_obj.font_size,
             'dark_mode': settings_obj.dark_mode,
@@ -841,7 +865,7 @@ def api_backup(request):
         'favorites': [
             {
                 'word_id': f.word_id,
-                'created_at': f.created_at.isoformat(),
+                'created_at': timezone.localtime(f.created_at).isoformat(),
             }
             for f in Favorite.objects.all()
         ],
@@ -959,7 +983,7 @@ def api_note(request, word_id):
             'success': True,
             'content': note.content if note else '',
             'page_number': note.page_number if note else None,
-            'updated_at': note.updated_at.strftime('%Y-%m-%d %H:%M') if note and note.updated_at else None,
+            'updated_at': timezone.localtime(note.updated_at).strftime('%Y-%m-%d %H:%M') if note and note.updated_at else None,
         })
     if request.method == 'DELETE':
         Note.objects.filter(word=word).delete()
@@ -987,7 +1011,7 @@ def api_quick_memory(request, word_id):
         return JsonResponse({
             'success': True,
             'content': qm.content if qm else '',
-            'updated_at': qm.updated_at.strftime('%Y-%m-%d %H:%M') if qm and qm.updated_at else None,
+            'updated_at': timezone.localtime(qm.updated_at).strftime('%Y-%m-%d %H:%M') if qm and qm.updated_at else None,
         })
     if request.method == 'DELETE':
         QuickMemory.objects.filter(word=word).delete()
@@ -1080,6 +1104,176 @@ def api_quick_memory_generate(request, word_id):
     qm.content = content
     qm.save()
     return JsonResponse({'success': True, 'content': content, 'cached': False})
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST', 'DELETE'])
+def api_assistant(request):
+    """小助手：GET 获取对话历史 / POST 提问（AI 回答，历史互通） / DELETE 清空历史"""
+    if request.method == 'GET':
+        msgs = ChatMessage.objects.all().order_by('id')
+        return JsonResponse({
+            'success': True,
+            'messages': [
+                {
+                    'id': m.id,
+                    'role': m.role,
+                    'content': m.content,
+                    'word_id': m.word_id,
+                    'created_at': timezone.localtime(m.created_at).strftime('%Y-%m-%d %H:%M'),
+                }
+                for m in msgs
+            ],
+        })
+
+    if request.method == 'DELETE':
+        ChatMessage.objects.all().delete()
+        return JsonResponse({'success': True})
+
+    # ---- POST：问答 ----
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        data = {}
+    user_text = (data.get('message') or '').strip()
+    if not user_text:
+        return JsonResponse({'error': '消息不能为空'}, status=400)
+
+    word = None
+    word_id = data.get('word_id')
+    if word_id:
+        try:
+            word = Word.objects.get(id=int(word_id))
+        except (Word.DoesNotExist, ValueError, TypeError):
+            word = None
+
+    # 校验 AI 配置（未配置时直接提示，不写入历史）
+    # 优先使用设置页指定的小助手模型；未指定时自动使用第一个启用的模型
+    settings_obj = UserSettings.get_settings()
+    if settings_obj.assistant_model:
+        data = dict(data)
+        data['model_id'] = settings_obj.assistant_model_id
+    try:
+        cfg = resolve_ai_model(data)
+    except ValueError as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+    # 构造上下文：系统提示 + 当前单词信息 + 最近对话历史
+    system_prompt = (
+        '你是「考研单词」学习 App 中的英语学习小助手，用户在背单词时向你提问。\n'
+        '要求：\n'
+        '- 用中文回答，准确、简洁、有条理\n'
+        '- 可讲解单词考法：词义辨析、固定搭配、词形变化、真题/考试常见考法、记忆技巧等\n'
+        '- 结合上下文保持对话连贯；不确定的内容要如实说明\n'
+        '- 排版要求：用清晰的 Markdown 格式组织回答——用 ### 小标题分节、**加粗** 关键词、\n'
+        '  用 - 或 1. 列表、用 --- 分隔线、善用表格，让答案层次分明、便于阅读\n'
+    )
+    messages = [{'role': 'system', 'content': system_prompt}]
+
+    if word:
+        word_ctx = (
+            f'当前单词：{word.word}\n'
+            f'音标：英 /{word.phonetic_uk or "-"}/ 美 /{word.phonetic_us or "-"}/\n'
+            f'词性：{word.pos or "-"}\n'
+            f'释义：{"；".join(word.get_meanings()[:5]) or "-"}\n'
+            f'搭配：{"；".join(word.get_collocations()[:5]) or "-"}\n'
+            f'词形变化：{word.get_word_forms() or "-"}\n'
+            f'例句：{word.example_en or ""} {word.example_zh or ""}'
+        )
+        messages.append({'role': 'system', 'content': word_ctx})
+
+    # 最近 20 条历史作为对话上下文（记忆互通）
+    for m in ChatMessage.objects.all().order_by('-id')[:20][::-1]:
+        messages.append({'role': m.role, 'content': m.content[:2000]})
+
+    messages.append({'role': 'user', 'content': user_text})
+
+    payload = {
+        'model': cfg['model_id'],
+        'temperature': 0.7,
+        'max_tokens': 1000,
+        'messages': messages,
+    }
+
+    req = urllib.request.Request(
+        resolve_ai_endpoint(cfg['base_url'], cfg['endpoint']),
+        data=json.dumps(payload).encode('utf-8'),
+        headers=build_ai_headers(cfg['api_key']),
+        method='POST',
+    )
+
+    # 先保存用户消息；AI 调用失败时回滚，保证历史里只有成功的问答
+    user_msg = ChatMessage.objects.create(
+        role='user', content=user_text, word_id=word.id if word else None)
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8', 'ignore')
+        user_msg.delete()
+        return JsonResponse({'error': 'AI 接口错误 (HTTP %s): %s' % (e.code, body[:400])}, status=502)
+    except urllib.error.URLError as e:
+        user_msg.delete()
+        return JsonResponse({'error': '无法连接 %s: %s' % (resolve_ai_endpoint(cfg['base_url'], cfg['endpoint']), e.reason)}, status=502)
+
+    content = (result.get('choices', [{}])[0].get('message', {}).get('content', '') or '').strip()
+    if not content:
+        user_msg.delete()
+        return JsonResponse({'error': 'AI 未返回有效内容'}, status=502)
+
+    ai_msg = ChatMessage.objects.create(
+        role='assistant', content=content, word_id=word.id if word else None)
+
+    def _ser(m):
+        return {
+            'id': m.id,
+            'role': m.role,
+            'content': m.content,
+            'word_id': m.word_id,
+            'created_at': timezone.localtime(m.created_at).strftime('%Y-%m-%d %H:%M'),
+        }
+
+    return JsonResponse({'success': True, 'user_message': _ser(user_msg), 'assistant_message': _ser(ai_msg)})
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
+def api_assistant_model(request):
+    """小助手模型配置：GET 查询当前指定 / POST 设置（null = 自动使用第一个启用模型）"""
+    settings_obj = UserSettings.get_settings()
+
+    if request.method == 'GET':
+        m = settings_obj.assistant_model
+        return JsonResponse({
+            'assistant_model_id': m.id if m else None,
+            'assistant_model_name': (m.display_name or m.model_id) if m else None,
+        })
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+
+    mid = data.get('model_id')
+    if mid:
+        try:
+            m = AIModel.objects.get(id=int(mid))
+        except (AIModel.DoesNotExist, ValueError, TypeError):
+            return JsonResponse({'error': '模型不存在'}, status=404)
+        if not m.enabled:
+            return JsonResponse({'error': '该模型已被禁用，请先启用'}, status=400)
+        settings_obj.assistant_model = m
+    else:
+        settings_obj.assistant_model = None
+    settings_obj.save()
+
+    cur = settings_obj.assistant_model
+    return JsonResponse({
+        'success': True,
+        'assistant_model_id': cur.id if cur else None,
+        'assistant_model_name': (cur.display_name or cur.model_id) if cur else None,
+    })
 
 
 @csrf_exempt

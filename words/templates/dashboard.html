@@ -53,6 +53,26 @@
     <div class="stat-value">{{ review_due }}</div>
     <div class="stat-label">到期需复习的单词</div>
   </div>
+
+  <div class="card stat-card">
+    <div class="card-header" style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
+      <i class="ph ph-fire ph-sm"></i> 连续打卡
+    </div>
+    <div class="stat-value" style="color: var(--c-green);">{{ streak }} <span style="font-size: var(--fs-base); font-weight: 400; color: var(--c-text-3);">天</span></div>
+    <div class="stat-label" id="checkin-status">
+      {% if today_checkin and today_checkin.is_checked %}
+        今日已打卡
+      {% else %}
+        今日尚未打卡
+      {% endif %}
+    </div>
+    {% if not today_checkin or not today_checkin.is_checked %}
+    <div class="progress-bar" style="margin-top: 12px;">
+      <div class="progress-bar-fill" style="width: {{ checkin_percent }}%;"></div>
+    </div>
+    <div class="stat-label" style="margin-top: 8px;">今日已学 {{ checkin_words }} 词，满 {{ checkin_threshold }} 词自动打卡</div>
+    {% endif %}
+  </div>
 </div>
 
 <!-- Quick actions -->
@@ -62,37 +82,21 @@
     <a href="{% url 'words:learn_start' %}" class="btn btn-primary"><i class="ph ph-target"></i> 开始背新词</a>
     <a href="{% url 'words:review_session' %}" class="btn btn-primary"><i class="ph ph-arrows-clockwise"></i> 开始复习</a>
     <a href="{% url 'words:focus_mode' %}" class="btn btn-secondary"><i class="ph ph-eye"></i> 专注模式</a>
-    <button id="checkinBtn" class="btn btn-primary"><i class="ph ph-check-circle"></i> 立即打卡</button>
   </div>
 </div>
 
-<!-- Streak & plan -->
-<div class="card-grid" style="margin-bottom: 24px;">
-  <div class="card text-center">
-    <div class="card-header">连续打卡</div>
-    <div class="stat-value" style="color: var(--c-green); display: flex; align-items: center; justify-content: center; gap: 6px;">
-      <i class="ph ph-fire" style="font-size: 1.2em;"></i> {{ streak }} 天
-    </div>
-    <div class="stat-label" id="checkin-status">
-      {% if today_checkin and today_checkin.is_checked %}
-        今日已打卡
-      {% else %}
-        今日尚未打卡
-      {% endif %}
-    </div>
-  </div>
-
-  {% if plan %}
-  <div class="card">
-    <div class="card-header">当前计划：{{ plan.name }}</div>
+{% if plan %}
+<div class="card" style="margin-bottom: 24px;">
+  <div class="card-header">当前计划：{{ plan.name }}</div>
+  <div class="flex gap-4" style="flex-wrap: wrap;">
     <div class="stat-label">每日新词：{{ plan.daily_new_words }}</div>
     <div class="stat-label">每日复习：{{ plan.daily_review_count }}</div>
     <div class="stat-label">目标日期：{{ plan.target_date|default:"未设置" }}</div>
     <div class="stat-label">剩余单词：{{ plan.remaining_words }}</div>
     <div class="stat-label">预计天数：{{ plan.estimated_days }} 天</div>
   </div>
-  {% endif %}
 </div>
+{% endif %}
 
 <!-- Weekly Trend Chart -->
 <div class="card" style="margin-bottom: 24px;">
@@ -205,23 +209,7 @@
     }
   }
 
-  // Quick check-in
-  document.getElementById('checkinBtn').addEventListener('click', async function () {
-    try {
-      var res = await VOCAB_API.post('/api/checkin/');
-      if (res.success) {
-        showToast('打卡成功！连续打卡 ' + res.streak + ' 天', 'success');
-        var statusEl = document.getElementById('checkin-status');
-        if (statusEl) {
-          statusEl.textContent = '今日已打卡';
-        }
-      } else {
-        showToast(res.error || '打卡失败', 'error');
-      }
-    } catch (e) {
-      showToast('打卡请求失败', 'error');
-    }
-  });
+  // 打卡已改为自动：每日学习满 {{ checkin_threshold }} 词自动打卡，无需手动操作
 
   // Load chart on page ready
   document.addEventListener('DOMContentLoaded', function () {
