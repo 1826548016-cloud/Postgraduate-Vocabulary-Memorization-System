@@ -35,14 +35,6 @@
           <input type="radio" name="focusMode" value="random">
           <span>乱序背诵</span>
         </label>
-        <label class="flex items-center gap-2">
-          <input type="radio" name="focusMode" value="cover_en">
-          <span>遮英文回忆中文</span>
-        </label>
-        <label class="flex items-center gap-2">
-          <input type="radio" name="focusMode" value="cover_zh">
-          <span>遮中文默写英文</span>
-        </label>
       </div>
     </div>
 
@@ -287,18 +279,14 @@ function focusRender() {
   // 切换单词时收起笔记/速记展开区
   if (window.WordExtPanel) WordExtPanel.closeExtPanel();
 
-  if (focusMode === 'cover_en') {
-    document.getElementById('focusWord').textContent = '???';
-  } else {
-    document.getElementById('focusWord').textContent = word.word;
-  }
+  document.getElementById('focusWord').textContent = word.word;
   document.getElementById('focusDetails').style.display = 'none';
 
   document.getElementById('focusCounter').textContent = (focusIndex + 1) + ' / ' + focusWords.length;
   document.getElementById('focusProgress').style.width = ((focusIndex) / focusWords.length * 100) + '%';
 
   // Auto speak
-  if (word.word && focusMode !== 'cover_en') {
+  if (word.word) {
     setTimeout(function () { speak(word.word); }, 200);
   }
 
@@ -335,11 +323,7 @@ function focusFlip() {
 
   if (isFlipped) {
     details.style.display = 'none';
-    if (focusMode === 'cover_en') {
-      document.getElementById('focusWord').textContent = '???';
-    } else {
-      document.getElementById('focusWord').textContent = word.word;
-    }
+    document.getElementById('focusWord').textContent = word.word;
     isFlipped = false;
   } else {
     document.getElementById('focusPhonetic').textContent = word.phonetic_us || '';
@@ -347,10 +331,6 @@ function focusFlip() {
     document.getElementById('focusMeaning').innerHTML = formatFocusMeanings(word);
     document.getElementById('focusExample').textContent = '';
     details.style.display = 'block';
-
-    if (focusMode === 'cover_en') {
-      document.getElementById('focusWord').textContent = word.word;
-    }
 
     isFlipped = true;
   }

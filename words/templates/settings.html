@@ -177,82 +177,8 @@
   </div>
 </div>
 
-<!-- ===== 添加 / 编辑模型 Modal ===== -->
-<div id="addModelModal" class="modal-overlay hidden" onclick="if (event.target === this) closeAddModel()">
-  <div class="modal" style="max-width: 520px;">
-    <input type="hidden" id="amEditId" value="">
-    <div class="flex justify-between items-center" style="margin-bottom: 16px;">
-      <h3 id="amModalTitle" style="margin: 0; font-size: var(--fs-lg);"><i class="ph ph-plus" style="color: var(--c-green);"></i> 添加模型</h3>
-      <button class="btn btn-ghost" onclick="closeAddModel()" title="关闭"><i class="ph ph-x"></i></button>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">模型服务商</label>
-      <select id="amProvider" class="form-input" onchange="changeAMProvider()"></select>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">模型</label>
-      <select id="amModelPreset" class="form-input" onchange="onAMPresetChange()"></select>
-      <div id="amCustomModelWrap" class="hidden" style="margin-top: 8px;">
-        <input type="text" id="amModelId" class="form-input" placeholder="输入模型 ID，如 gpt-4o">
-      </div>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">API 格式</label>
-      <div class="form-input" style="background: var(--c-bg); color: var(--c-text-3); cursor: default;">OpenAI Chat Completions 格式（兼容 /v1/chat/completions）</div>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">API 密钥 <span class="text-secondary" style="font-weight: normal;">（本机服务可留空）</span> <a href="https://platform.openai.com/api-keys" target="_blank" class="text-sm" style="color: var(--c-green); margin-left: 6px;">获取 API 密钥 →</a></label>
-      <div class="ai-key-wrap">
-        <input type="password" id="amApiKey" class="form-input" placeholder="sk-...（无鉴权服务可不填）" autocomplete="off">
-        <button type="button" class="ai-key-toggle" id="amKeyToggle" onclick="toggleAMKeyVisible()" title="显示/隐藏密钥"><i class="ph ph-eye"></i></button>
-      </div>
-    </div>
-
-    <div class="form-group">
-      <div class="flex justify-between items-center">
-        <label class="form-label" style="margin: 0;">自定义请求地址 <span class="text-secondary" style="font-weight: normal;">（可选）</span></label>
-        <div class="flex items-center gap-2">
-          <span class="text-sm text-secondary">完整 URL</span>
-          <label class="switch"><input type="checkbox" id="amFullUrl" onchange="onAMFullUrlChange()"><span class="slider"></span></label>
-        </div>
-      </div>
-      <input type="text" id="amBaseUrl" class="form-input" placeholder="https://api.openai.com/v1">
-      <div id="amUrlHint" class="text-sm text-secondary" style="margin-top: 4px;">关闭：填基础地址，自动拼接 /chat/completions；打开：直接填完整请求地址，如 http://localhost:4096/v1/chat/completions</div>
-    </div>
-
-    <div class="form-group">
-      <button type="button" class="text-sm" style="background:none;border:none;color:var(--c-text-3);cursor:pointer;padding:0;" onclick="toggleAMAdvanced()">
-        <i class="ph ph-caret-right" id="amAdvCaret"></i> 高级配置
-      </button>
-      <div id="amAdvanced" class="hidden grid grid-2" style="margin-top: 8px; gap: 8px;">
-        <div>
-          <label class="form-label">模型展示名称</label>
-          <input type="text" id="amDisplayName" class="form-input" placeholder="留空默认显示模型 ID">
-        </div>
-        <div>
-          <label class="form-label">上下文窗口</label>
-          <select id="amContext" class="form-input">
-            <option value="32K">32K</option>
-            <option value="128K" selected>128K</option>
-            <option value="256K">256K</option>
-            <option value="1M">1M</option>
-          </select>
-        </div>
-      </div>
-    </div>
-
-    <div id="amTestResult" class="ai-test-result" style="margin: 8px 0;"></div>
-
-    <div class="flex gap-2 justify-end">
-      <button class="btn btn-secondary" onclick="closeAddModel()">取消</button>
-      <button class="btn btn-primary" id="amSubmitBtn" onclick="submitAddModel()"><i class="ph ph-check"></i> 添加模型</button>
-    </div>
-  </div>
-</div>
+<!-- AI 模型配置窗口（API 填写）已独立为全局窗口，见 partials/ai_model_modal.html，
+     通过 openAddModel() 打开；模型列表仍在本页管理。 -->
 
 {% endblock %}
 
@@ -431,86 +357,13 @@ async function doResetConfirm() {
 }
 
 // ===== AI 模型管理 =====
-// 模型服务商预设（全部为 OpenAI 兼容接口），models 元素: { id, vision: 是否支持图片识别 }
-var AI_PROVIDERS = [
-  { id: 'openai', name: 'OpenAI', base: 'https://api.openai.com/v1', models: [
-    { id: 'gpt-4o', vision: true }, { id: 'gpt-4o-mini', vision: true },
-    { id: 'gpt-4.1', vision: true }, { id: 'gpt-4.1-mini', vision: true },
-  ]},
-  { id: 'gemini', name: 'Google Gemini', base: 'https://generativelanguage.googleapis.com/v1beta/openai', models: [
-    { id: 'gemini-2.5-pro', vision: true }, { id: 'gemini-2.5-flash', vision: true },
-    { id: 'gemini-2.0-flash', vision: true },
-  ]},
-  { id: 'anthropic', name: 'Anthropic Claude', base: 'https://api.anthropic.com/v1', models: [
-    { id: 'claude-sonnet-4-5', vision: true }, { id: 'claude-opus-4-1', vision: true },
-    { id: 'claude-3-7-sonnet', vision: true },
-  ]},
-  { id: 'xai', name: 'xAI (Grok)', base: 'https://api.x.ai/v1', models: [
-    { id: 'grok-4', vision: true }, { id: 'grok-4-fast', vision: true }, { id: 'grok-3', vision: true },
-  ]},
-  { id: 'qwen', name: '通义千问 (阿里云百炼)', base: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: [
-    { id: 'qwen-vl-max', vision: true }, { id: 'qwen-vl-plus', vision: true },
-    { id: 'qwen2.5-vl-72b-instruct', vision: true },
-  ]},
-  { id: 'zhipu', name: '智谱 GLM (BigModel)', base: 'https://open.bigmodel.cn/api/paas/v4', models: [
-    { id: 'glm-4v-plus', vision: true }, { id: 'glm-4v-flash', vision: true },
-    { id: 'glm-4.5v', vision: true }, { id: 'glm-4.5', vision: false },
-  ]},
-  { id: 'deepseek', name: 'DeepSeek', base: 'https://api.deepseek.com/v1', models: [
-    { id: 'deepseek-chat', vision: false }, { id: 'deepseek-reasoner', vision: false },
-  ]},
-  { id: 'kimi', name: '月之暗面 Kimi', base: 'https://api.moonshot.cn/v1', models: [
-    { id: 'kimi-latest', vision: true }, { id: 'moonshot-v1-8k', vision: true },
-  ]},
-  { id: 'siliconflow', name: '硅基流动 SiliconFlow', base: 'https://api.siliconflow.cn/v1', models: [
-    { id: 'Qwen/Qwen2.5-VL-72B-Instruct', vision: true },
-    { id: 'Qwen/Qwen2.5-VL-32B-Instruct', vision: true },
-    { id: 'deepseek-ai/deepseek-vl2', vision: true },
-  ]},
-  { id: 'ark', name: '火山引擎 (豆包)', base: 'https://ark.cn-beijing.volces.com/api/v3', models: [
-    { id: 'doubao-seed-1.6-vision', vision: true },
-    { id: 'doubao-1.5-vision-pro', vision: true },
-  ]},
-  { id: 'hunyuan', name: '腾讯混元', base: 'https://api.hunyuan.cloud.tencent.com/v1', models: [
-    { id: 'hunyuan-vision', vision: true }, { id: 'hunyuan-lite', vision: true },
-  ]},
-  { id: 'qianfan', name: '百度千帆', base: 'https://qianfan.baidubce.com/v2', models: [
-    { id: 'ernie-4.5-vl-8b', vision: true }, { id: 'ernie-4.5-vl-2b-fp8', vision: true },
-  ]},
-  { id: 'minimax', name: 'MiniMax', base: 'https://api.minimax.chat/v1', models: [
-    { id: 'MiniMax-VL-01', vision: true }, { id: 'MiniMax-M2', vision: true },
-  ]},
-  { id: 'groq', name: 'Groq', base: 'https://api.groq.com/openai/v1', models: [
-    { id: 'llama-3.2-90b-vision-preview', vision: true },
-    { id: 'llama-3.2-11b-vision-preview', vision: true },
-  ]},
-  { id: 'mistral', name: 'Mistral', base: 'https://api.mistral.ai/v1', models: [
-    { id: 'pixtral-large-2509', vision: true }, { id: 'pixtral-12b', vision: true },
-  ]},
-  { id: 'openrouter', name: 'OpenRouter', base: 'https://openrouter.ai/api/v1', models: [
-    { id: 'openai/gpt-4o', vision: true }, { id: 'google/gemini-2.5-flash', vision: true },
-  ]},
-  { id: 'ollama', name: 'Ollama (本地)', base: 'http://localhost:11434/v1', models: [
-    { id: 'llama3.2-vision', vision: true }, { id: 'qwen2.5-vl', vision: true },
-  ]},
-  { id: 'novita', name: 'Novita', base: 'https://api.novita.ai/v3/openai', models: [
-    { id: 'google/gemini-2.5-flash', vision: true }, { id: 'meta-llama/llama-3.2-90b-vision', vision: true },
-  ]},
-  { id: 'zai', name: 'Z.ai (GLM 海外)', base: 'https://api.z.ai/api/paas/v4', models: [
-    { id: 'glm-4.5v', vision: true }, { id: 'glm-4v-plus', vision: true },
-  ]},
-  { id: 'opencode', name: 'opencode (本地服务)', base: 'http://localhost:4096/v1', models: [] },
-  { id: 'custom', name: '自定义（OpenAI 兼容）', base: 'https://api.openai.com/v1', models: [] },
-];
-
+// 模型服务商预设与「添加 / 编辑模型（API 填写）」窗口已抽为全局独立窗口（static/js/ai_model_modal.js），
+// 本页只负责模型列表的展示、启停、删除与小助手模型选择。
 var aiModels = [];
 
 function escapeHtml(s) {
   if (s === null || s === undefined) return '';
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-function aiProviderInfo(pid) {
-  return AI_PROVIDERS.find(function (p) { return p.id === pid; }) || AI_PROVIDERS[AI_PROVIDERS.length - 1];
 }
 function visionTag(m) {
   return m.vision !== false
@@ -535,6 +388,9 @@ function loadAIModels() {
     return aiModels;
   });
 }
+
+// 全局 API 填写窗口保存成功后刷新本页模型列表
+window.aiModelModalOnSaved = loadAIModels;
 
 // ===== 小助手模型 =====
 function loadAssistantModel() {
@@ -622,207 +478,8 @@ function deleteAIModel(id) {
 function editAIModel(id) {
   var m = aiModels.find(function (x) { return x.id === id; });
   if (!m) return;
-  fillAddModel(m);
-  document.getElementById('amEditId').value = id;
-  document.getElementById('amModalTitle').textContent = '编辑模型';
-  document.getElementById('amSubmitBtn').innerHTML = '<i class="ph ph-check"></i> 保存模型';
-  document.getElementById('addModelModal').classList.remove('hidden');
+  openAddModel(m);
 }
-
-function openAddModel() {
-  fillAddModel(null);
-  document.getElementById('amEditId').value = '';
-  document.getElementById('amModalTitle').textContent = '添加模型';
-  document.getElementById('amSubmitBtn').innerHTML = '<i class="ph ph-check"></i> 添加模型';
-  document.getElementById('addModelModal').classList.remove('hidden');
-}
-function closeAddModel() {
-  document.getElementById('addModelModal').classList.add('hidden');
-}
-
-function fillAddModel(m) {
-  var psel = document.getElementById('amProvider');
-  psel.innerHTML = '';
-  AI_PROVIDERS.forEach(function (p) {
-    var opt = document.createElement('option');
-    opt.value = p.id; opt.textContent = p.name;
-    psel.appendChild(opt);
-  });
-  psel.value = m ? m.provider : AI_PROVIDERS[0].id;
-  renderAMPresets(psel.value);
-
-  var preset = document.getElementById('amModelPreset');
-  var inPreset = Array.prototype.some.call(preset.options, function (o) { return o.value === (m ? m.model_id : ''); });
-  if (m && !inPreset) {
-    preset.value = '__custom__';
-    document.getElementById('amCustomModelWrap').classList.remove('hidden');
-    document.getElementById('amModelId').value = m.model_id;
-  } else if (m) {
-    preset.value = m.model_id;
-    document.getElementById('amCustomModelWrap').classList.add('hidden');
-  } else {
-    document.getElementById('amCustomModelWrap').classList.add('hidden');
-  }
-
-  document.getElementById('amApiKey').value = m ? (m.api_key || '') : '';
-  document.getElementById('amBaseUrl').value = m ? (m.endpoint || m.base_url || '') : '';
-  document.getElementById('amFullUrl').checked = !!(m && m.endpoint);
-  onAMFullUrlChange();
-  document.getElementById('amDisplayName').value = m ? (m.display_name || '') : '';
-  document.getElementById('amContext').value = m ? (m.context || '128K') : '128K';
-  document.getElementById('amAdvanced').classList.add('hidden');
-  document.getElementById('amAdvCaret').className = 'ph ph-caret-right';
-  document.getElementById('amTestResult').className = 'ai-test-result';
-  document.getElementById('amTestResult').innerHTML = '';
-}
-
-function changeAMProvider() {
-  renderAMPresets(document.getElementById('amProvider').value);
-}
-
-function renderAMPresets(pid) {
-  var p = aiProviderInfo(pid);
-  var sel = document.getElementById('amModelPreset');
-  sel.innerHTML = '';
-  p.models.forEach(function (m) {
-    var opt = document.createElement('option');
-    opt.value = m.id;
-    opt.textContent = m.id + (m.vision ? '（视觉）' : '（文本模式）');
-    sel.appendChild(opt);
-  });
-  var opt2 = document.createElement('option');
-  opt2.value = '__custom__'; opt2.textContent = '使用其他模型';
-  sel.appendChild(opt2);
-  sel.value = p.models.length ? p.models[0].id : '__custom__';
-  onAMPresetChange();
-}
-
-function onAMPresetChange() {
-  var custom = document.getElementById('amModelPreset').value === '__custom__';
-  document.getElementById('amCustomModelWrap').classList.toggle('hidden', !custom);
-  if (custom) document.getElementById('amModelId').value = '';
-}
-
-function toggleAMAdvanced() {
-  var adv = document.getElementById('amAdvanced');
-  var show = adv.classList.toggle('hidden');
-  document.getElementById('amAdvCaret').className = show ? 'ph ph-caret-right' : 'ph ph-caret-down';
-}
-
-function onAMFullUrlChange() {
-  var full = document.getElementById('amFullUrl').checked;
-  var input = document.getElementById('amBaseUrl');
-  var hint = document.getElementById('amUrlHint');
-  if (full) {
-    input.placeholder = 'http://localhost:4096/v1/chat/completions';
-    hint.textContent = '将直接使用该完整地址发起请求（不再自动拼接 /chat/completions）';
-  } else {
-    input.placeholder = 'https://api.openai.com/v1';
-    hint.textContent = '关闭：填基础地址，自动拼接 /chat/completions；打开：直接填完整请求地址，如 http://localhost:4096/v1/chat/completions';
-  }
-}
-
-function toggleAMKeyVisible() {
-  var input = document.getElementById('amApiKey');
-  var icon = document.querySelector('#amKeyToggle i');
-  if (input.type === 'password') {
-    input.type = 'text';
-    icon.className = 'ph ph-eye-slash';
-  } else {
-    input.type = 'password';
-    icon.className = 'ph ph-eye';
-  }
-}
-
-// 提交添加/编辑模型：先测试连接，成功后保存到数据库
-async function submitAddModel() {
-  var editId = document.getElementById('amEditId').value;
-  var provider = document.getElementById('amProvider').value;
-  var preset = document.getElementById('amModelPreset').value;
-  var modelId = preset === '__custom__' ? document.getElementById('amModelId').value.trim() : preset;
-  var apiKey = document.getElementById('amApiKey').value.trim();
-  var customUrl = document.getElementById('amBaseUrl').value.trim();
-  var fullUrl = document.getElementById('amFullUrl').checked;
-  var displayName = document.getElementById('amDisplayName').value.trim();
-  var context = document.getElementById('amContext').value;
-
-  if (!modelId) { showToast('请填写模型 ID', 'error'); return; }
-
-  // 视觉能力判断：预置模型按标记，自定义默认支持；非视觉模型可通过文本/文件方式导入
-  var vision = true;
-  if (preset !== '__custom__') {
-    var pCheck = aiProviderInfo(provider);
-    var presetObj = pCheck.models.find(function (x) { return x.id === preset; });
-    vision = presetObj ? presetObj.vision : true;
-  }
-
-  var p = aiProviderInfo(provider);
-  var endpoint = '';                 // 完整请求地址（打开"完整 URL"开关时）
-  var baseUrl = p.base;              // 基础地址（关闭开关时）
-  if (fullUrl) {
-    endpoint = customUrl;
-    if (!endpoint) { showToast('请填写完整的请求地址，如 http://localhost:4096/v1/chat/completions', 'error'); return; }
-    baseUrl = '';
-  } else if (customUrl) {
-    baseUrl = customUrl;
-  }
-
-  var btn = document.getElementById('amSubmitBtn');
-  var box = document.getElementById('amTestResult');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i> 验证连接中…';
-  box.className = 'ai-test-result';
-  box.innerHTML = '<span class="ai-test-loading"><i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i> 正在验证连接…</span>';
-
-  try {
-    var res = await VOCAB_API.post('/api/ai/test/', {
-      api_key: apiKey,
-      base_url: baseUrl,
-      endpoint: endpoint,
-      model: modelId,
-    });
-    if (!res.success) {
-      box.className = 'ai-test-result ai-test-fail';
-      var hint = res.key_invalid ? '（密钥无效，请检查后重试）' : (res.model_invalid ? '（模型或接口地址错误）' : '');
-      box.innerHTML = '<i class="ph ph-x-circle"></i> ' + (res.error || '验证失败') + hint;
-      return;
-    }
-    var saveRes = await VOCAB_API.post('/api/ai-models/', {
-      id: editId || undefined,
-      provider: provider,
-      model_id: modelId,
-      display_name: displayName,
-      base_url: baseUrl,
-      endpoint: endpoint,
-      api_key: apiKey,
-      context: context,
-      vision: vision,
-      enabled: true,
-    });
-    if (!saveRes.success) {
-      box.className = 'ai-test-result ai-test-fail';
-      box.innerHTML = '<i class="ph ph-x-circle"></i> ' + (saveRes.error || '保存失败');
-      return;
-    }
-    box.className = 'ai-test-result ai-test-ok';
-    box.innerHTML = '<i class="ph ph-check-circle"></i> 连接成功，模型已' + (editId ? '更新' : '添加');
-    await loadAIModels();
-    setTimeout(function () { closeAddModel(); }, 700);
-  } catch (e) {
-    box.className = 'ai-test-result ai-test-fail';
-    box.innerHTML = '<i class="ph ph-x-circle"></i> ' + ((e && e.error) || '验证请求失败');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="ph ph-check"></i> ' + (editId ? '保存模型' : '添加模型');
-  }
-}
-
-// ESC 关闭弹窗
-document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape' && !document.getElementById('addModelModal').classList.contains('hidden')) {
-    closeAddModel();
-  }
-});
 
 </script>
 {% endblock %}

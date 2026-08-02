@@ -40,10 +40,13 @@
       <i class="ph ph-warning-circle" style="color: var(--c-red); font-size: 20px;"></i>
       <div>
         <div style="font-weight: 600;">尚未配置 AI 模型</div>
-        <div class="text-sm text-secondary">请先到「设置 → AI 模型」中添加并启用一个模型，才能使用图片 / 文本识别与 AI 复审</div>
+        <div class="text-sm text-secondary">点击右侧「添加模型」直接在弹窗中填写 API 密钥，或到「设置 → AI 模型」中管理模型</div>
       </div>
     </div>
-    <a class="btn btn-primary btn-sm" href="{% url 'words:settings_page' %}#ai-models"><i class="ph ph-sliders-horizontal"></i> 去设置配置模型</a>
+    <div class="flex gap-2">
+      <button class="btn btn-primary btn-sm" onclick="openAddModel()"><i class="ph ph-plus"></i> 添加模型</button>
+      <a class="btn btn-secondary btn-sm" href="{% url 'words:settings_page' %}#ai-models"><i class="ph ph-sliders-horizontal"></i> 去设置管理</a>
+    </div>
   </div>
 </div>
 
@@ -89,10 +92,11 @@
   </div>
 
   <div class="form-group" style="margin-top: 14px;">
-    <label class="form-label">选择模型 <a class="text-sm" href="{% url 'words:settings_page' %}#ai-models" style="color: var(--c-green); margin-left: 4px;">管理模型 →</a></label>
+    <label class="form-label">选择模型 <a class="text-sm" onclick="openAddModel()" style="color: var(--c-green); margin-left: 4px; cursor: pointer;">添加模型 →</a></label>
     <div class="flex gap-2">
       <select id="aiModelSelect" class="form-input" onchange="onAIModelSelectChange()"></select>
-      <a class="btn btn-secondary btn-sm" href="{% url 'words:settings_page' %}#ai-models" style="white-space: nowrap;"><i class="ph ph-sliders-horizontal"></i> 管理模型</a>
+      <button class="btn btn-secondary btn-sm" onclick="openAddModel()" style="white-space: nowrap;" title="直接在弹窗中填写 API 密钥并添加模型"><i class="ph ph-plus"></i> 添加模型</button>
+      <a class="btn btn-ghost btn-sm" href="{% url 'words:settings_page' %}#ai-models" style="white-space: nowrap;"><i class="ph ph-sliders-horizontal"></i> 管理</a>
     </div>
     <div id="aiModelInfo" class="ai-test-result" style="color: var(--c-text-3);"></div>
   </div>
@@ -468,6 +472,14 @@
     bar.classList.toggle('hidden', hasEnabled);
   }
 
+  // 全局 API 填写窗口（openAddModel）保存成功后，重新加载模型并刷新选择框 / 横幅
+  window.aiModelModalOnSaved = function () {
+    return loadAIModels().then(function () {
+      refreshAIModelSelect();
+      showAIModelBanner();
+    });
+  };
+
   // 切换输入源（图片 / 纯文本 / 文件）
   function switchAISource(src, silent) {
     aiSource = src;
@@ -502,14 +514,14 @@
         opt.textContent = (m.display_name || m.model_id) + (isVisionModel(m) ? ' · 视觉' : ' · 文本模式');
         sel.appendChild(opt);
       });
-      if (lastId && enabled.some(function (m) { return m.id === lastId; })) sel.value = lastId;
+      if (lastId && enabled.some(function (m) { return String(m.id) === String(lastId); })) sel.value = lastId;
     }
     onAIModelSelectChange();
   }
 
   function getSelectedAIModel() {
     var sel = document.getElementById('aiModelSelect');
-    return aiModels.find(function (m) { return m.id === sel.value; }) || null;
+    return aiModels.find(function (m) { return String(m.id) === String(sel.value); }) || null;
   }
 
   function onAIModelSelectChange() {

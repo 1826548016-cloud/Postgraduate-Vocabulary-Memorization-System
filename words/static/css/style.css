@@ -135,11 +135,6 @@ body {
   display: flex; flex-direction: column;
 }
 
-/* ===== 专注模式 ===== */
-.focus-active .sidebar { display: none; }
-.focus-active .main-content { margin-left: 0; }
-.focus-active .top-bar { display: none; }
-
 /* Top Bar */
 .top-bar {
   position: sticky; top: 0; z-index: 30;

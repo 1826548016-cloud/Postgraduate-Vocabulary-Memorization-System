@@ -14,7 +14,6 @@
       <span id="progressText">-</span>
     </div>
     <div class="flex gap-2 items-center">
-      <button id="focusModeBtn" class="btn btn-secondary btn-sm" onclick="toggleFocusMode()" title="全屏沉浸式背诵"><i class="ph ph-eye"></i> 专注模式</button>
       <span class="badge badge-learning">{{ mode }}</span>
     </div>
   </div>
@@ -114,40 +113,6 @@
     completionMsg: document.getElementById('completionMsg'),
   };
 
-  var focusActive = false;
-
-  function toggleFocusMode() {
-    focusActive = !focusActive;
-    if (focusActive) {
-      document.body.classList.add('focus-active');
-      document.getElementById('focusModeBtn').innerHTML = '<i class="ph ph-x"></i> 退出专注';
-      try {
-        if (document.documentElement.requestFullscreen) {
-          document.documentElement.requestFullscreen();
-        }
-      } catch (e) {}
-    } else {
-      document.body.classList.remove('focus-active');
-      document.getElementById('focusModeBtn').innerHTML = '<i class="ph ph-eye"></i> 专注模式';
-      try {
-        if (document.fullscreenElement) {
-          document.exitFullscreen();
-        }
-      } catch (e) {}
-    }
-    // Trigger resize to re-layout
-    window.dispatchEvent(new Event('resize'));
-  }
-
-  // Listen for ESC to exit focus mode
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && focusActive) {
-      focusActive = false;
-      document.body.classList.remove('focus-active');
-      document.getElementById('focusModeBtn').innerHTML = '<i class="ph ph-eye"></i> 专注模式';
-    }
-  });
-
   function saveProgress() {
     sessionStorage.setItem('vocab-learn-idx', currentIndex);
   }
@@ -205,7 +170,6 @@
     els.wordMeaning.classList.add('hidden');
     els.wordExample.textContent = (currentWord.example_en || '') + '\n' + (currentWord.example_zh || '');
     els.wordExample.classList.add('hidden');
-    els.wordText.classList.remove('cover-mask');
     els.revealBtn.textContent = '显示释义 (空格键)';
     els.revealBtn.disabled = false;
 

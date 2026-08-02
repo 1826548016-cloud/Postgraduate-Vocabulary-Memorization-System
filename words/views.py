@@ -23,6 +23,30 @@ from .models import (Unit, Word, StudyProgress, StudyPlan,
 
 CHECKIN_DAILY_WORDS = 30  # 每日学习满 30 词自动打卡
 
+# ─── 登录 / 登出 ─────────────────────────────────────────────
+
+def login_view(request):
+    """登录页：单用户（settings.AUTH_USERNAME / AUTH_PASSWORD）"""
+    if request.session.get('is_logged_in'):
+        return redirect('words:dashboard')
+    error = None
+    next_url = request.GET.get('next') or request.POST.get('next') or ''
+    if request.method == 'POST':
+        username = (request.POST.get('username') or '').strip()
+        password = request.POST.get('password') or ''
+        if username == settings.AUTH_USERNAME and password == settings.AUTH_PASSWORD:
+            request.session['is_logged_in'] = True
+            request.session['username'] = username
+            return redirect(next_url or 'words:dashboard')
+        error = '用户名或密码错误'
+    return render(request, 'login.html', {'error': error, 'next': next_url})
+
+
+def logout_view(request):
+    """退出登录"""
+    request.session.flush()
+    return redirect('words:login')
+
 def update_daily_checkin():
     """更新今日打卡统计数据；今日背诵满 30 词自动打卡，返回是否刚刚自动打卡"""
     today = timezone.localdate()

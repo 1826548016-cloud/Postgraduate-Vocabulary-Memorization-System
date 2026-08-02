@@ -152,7 +152,7 @@
               $('qmMeta').textContent = '还没有速记，点击「生成速记」让 AI 为你创作（结果保存到数据库，下次直接查看）';
               toggleHidden('qmGenerateBtn', false);
             } else {
-              $('qmMeta').innerHTML = '尚未配置 AI 模型，请先到 <a href="' + aiSettingsUrl + '" style="color: var(--c-green);">设置 → AI 模型</a> 中添加并启用一个模型';
+              $('qmMeta').innerHTML = '尚未配置 AI 模型，<a onclick="openAddModel()" style="color: var(--c-green); cursor: pointer;">立即添加</a>，或到 <a href="' + aiSettingsUrl + '" style="color: var(--c-green);">设置 → AI 模型</a> 中管理';
             }
           });
         }
@@ -227,7 +227,7 @@
         } else {
           var err = (res && res.error) || '生成失败';
           if (err.indexOf('尚未配置 AI 模型') !== -1) {
-            $('qmMeta').innerHTML = '尚未配置 AI 模型，请先到 <a href="' + aiSettingsUrl + '" style="color: var(--c-green);">设置 → AI 模型</a> 中添加并启用一个模型';
+            $('qmMeta').innerHTML = '尚未配置 AI 模型，<a onclick="openAddModel()" style="color: var(--c-green); cursor: pointer;">立即添加</a>，或到 <a href="' + aiSettingsUrl + '" style="color: var(--c-green);">设置 → AI 模型</a> 中管理';
           } else {
             $('qmMeta').textContent = err;
           }
