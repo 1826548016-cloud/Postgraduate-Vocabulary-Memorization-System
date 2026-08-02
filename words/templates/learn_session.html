@@ -164,12 +164,26 @@
     if (currentWord) doSpeak(currentWord.word || '');
   }
 
-  function formatMeanings(meanings) {
-    if (!meanings) return '';
-    if (Array.isArray(meanings)) {
-      return meanings.map(function(m, i) { return (i + 1) + '. ' + m; }).join('\n');
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function formatMeanings(word) {
+    // 优先按词性分组展示：v. 释义；释义
+    var byPos = (word && word.meanings_by_pos) || {};
+    var posKeys = Object.keys(byPos).filter(function (k) { return byPos[k] && byPos[k].length; });
+    if (posKeys.length) {
+      return posKeys.map(function (p) {
+        return '<span class="meaning-pos">' + escapeHtml(p) + '</span> ' +
+          byPos[p].map(function (m) { return escapeHtml(m); }).join('；');
+      }).join('<br>');
     }
-    return String(meanings);
+    var meanings = word ? word.meanings : null;
+    if (Array.isArray(meanings)) {
+      return meanings.map(function (m, i) { return (i + 1) + '. ' + escapeHtml(m); }).join('<br>');
+    }
+    return meanings ? String(meanings) : '';
   }
 
   function renderWord() {
@@ -187,7 +201,7 @@
     els.wordText.textContent = currentWord.word || '';
     els.wordPhonetic.textContent = currentWord.phonetic_us || '';
     els.wordPos.textContent = currentWord.pos || '';
-    els.wordMeaning.textContent = formatMeanings(currentWord.meanings);
+    els.wordMeaning.innerHTML = formatMeanings(currentWord);
     els.wordMeaning.classList.add('hidden');
     els.wordExample.textContent = (currentWord.example_en || '') + '\n' + (currentWord.example_zh || '');
     els.wordExample.classList.add('hidden');

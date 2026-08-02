@@ -290,12 +290,26 @@
   function speakWord(text) { window.VOCAB_SPEAK(text); }
   function replayAudio() { if (currentWord) speakWord(currentWord.word); }
 
-  function formatMeanings(meanings) {
-    if (!meanings) return '';
-    if (Array.isArray(meanings)) {
-      return meanings.map(function (m, i) { return (i + 1) + '. ' + m; }).join('\n');
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function formatMeanings(word) {
+    // 优先按词性分组展示：v. 释义；释义
+    var byPos = (word && word.meanings_by_pos) || {};
+    var posKeys = Object.keys(byPos).filter(function (k) { return byPos[k] && byPos[k].length; });
+    if (posKeys.length) {
+      return posKeys.map(function (p) {
+        return '<span class="meaning-pos">' + escapeHtml(p) + '</span> ' +
+          byPos[p].map(function (m) { return escapeHtml(m); }).join('；');
+      }).join('<br>');
     }
-    return String(meanings);
+    var meanings = word ? word.meanings : null;
+    if (Array.isArray(meanings)) {
+      return meanings.map(function (m, i) { return (i + 1) + '. ' + escapeHtml(m); }).join('<br>');
+    }
+    return meanings ? String(meanings) : '';
   }
 
   function renderWord(word) {
@@ -312,7 +326,7 @@
     els.wordText.textContent = word.word || '';
     els.wordPhonetic.textContent = word.phonetic_us || '';
     els.wordPos.textContent = word.pos || '';
-    els.wordMeaning.textContent = formatMeanings(word.meanings);
+    els.wordMeaning.innerHTML = formatMeanings(word);
     els.wordExample.textContent = (word.example_en || '') + '\n' + (word.example_zh || '');
 
     els.levelBadge.textContent = '掌握等级：L' + lv;

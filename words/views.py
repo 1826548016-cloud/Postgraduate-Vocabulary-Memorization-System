@@ -178,6 +178,7 @@ def learn_session(request):
             'phonetic_us': w.phonetic_us,
             'pos': w.pos,
             'meanings': w.get_meanings(),
+            'meanings_by_pos': w.get_meanings_by_pos(),
             'example_en': w.example_en,
             'example_zh': w.example_zh,
             'unit_number': w.unit.number if w.unit else None,
@@ -217,6 +218,7 @@ def review_session(request):
             'phonetic_us': w.phonetic_us,
             'pos': w.pos,
             'meanings': w.get_meanings(),
+            'meanings_by_pos': w.get_meanings_by_pos(),
             'example_en': w.example_en,
             'example_zh': w.example_zh,
             'mastery_level': p.mastery_level,
@@ -320,6 +322,7 @@ def api_words(request):
             'phonetic_uk': w.phonetic_uk,
             'pos': w.pos,
             'meanings': w.get_meanings(),
+            'meanings_by_pos': w.get_meanings_by_pos(),
             'uncommon_meanings': w.get_uncommon_meanings(),
             'collocations': w.get_collocations(),
             'example_en': w.example_en,
@@ -348,6 +351,7 @@ def api_word_detail(request, word_id):
         'phonetic_uk': word.phonetic_uk,
         'pos': word.pos,
         'meanings': word.get_meanings(),
+        'meanings_by_pos': word.get_meanings_by_pos(),
         'uncommon_meanings': word.get_uncommon_meanings(),
         'collocations': word.get_collocations(),
         'word_forms': word.get_word_forms(),
@@ -492,6 +496,7 @@ def api_today(request):
         'phonetic_us': w.phonetic_us,
         'pos': w.pos,
         'meanings': w.get_meanings(),
+        'meanings_by_pos': w.get_meanings_by_pos(),
     } for w in new_words]
 
     # 今日需复习
@@ -506,6 +511,7 @@ def api_today(request):
         'phonetic_us': w.phonetic_us,
         'pos': w.pos,
         'meanings': w.get_meanings(),
+        'meanings_by_pos': w.get_meanings_by_pos(),
         'mastery_level': w.progress.mastery_level,
     } for w in review_words]
 
@@ -1320,6 +1326,7 @@ def api_learn_words(request):
             'phonetic_us': w.phonetic_us,
             'pos': w.pos,
             'meanings': w.get_meanings(),
+            'meanings_by_pos': w.get_meanings_by_pos(),
             'example_en': w.example_en,
             'example_zh': w.example_zh,
             'unit_number': w.unit.number if w.unit else None,
@@ -1738,6 +1745,8 @@ def api_word_update(request, word_id):
         meanings = data.get('meanings')
         if meanings is not None:
             word.meanings = json.dumps(meanings, ensure_ascii=False)
+            # 释义被手动修改后，旧的按词性分组不再可靠，清空以回退到普通展示
+            word.meanings_by_pos = '{}'
 
         uncommon_meanings = data.get('uncommon_meanings')
         if uncommon_meanings is not None:

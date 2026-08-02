@@ -42,6 +42,8 @@ class Word(models.Model):
     pos = models.CharField(max_length=50, blank=True, verbose_name='词性')
     meanings = models.TextField(verbose_name='释义', default='[]',
         help_text='JSON格式: ["释义1", "释义2"]')
+    meanings_by_pos = models.TextField(blank=True, verbose_name='按词性释义', default='{}',
+        help_text='JSON格式: {"v.": ["释义"], "n.": ["释义"]}')
     uncommon_meanings = models.TextField(blank=True, verbose_name='熟词僻义',
         default='[]')
     collocations = models.TextField(blank=True, verbose_name='搭配',
@@ -80,6 +82,14 @@ class Word(models.Model):
         except (json.JSONDecodeError, TypeError):
             return []
 
+    def get_meanings_by_pos(self):
+        """按词性分组的释义：{"v.": ["释义"], "n.": ["释义"]}；未生成时返回 {}"""
+        try:
+            data = json.loads(self.meanings_by_pos or '{}')
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
     def get_collocations(self):
         try:
             return json.loads(self.collocations)
@@ -93,6 +103,11 @@ class Word(models.Model):
             return {}
 
     def meanings_display(self):
+        by_pos = self.get_meanings_by_pos()
+        if by_pos:
+            parts = ['%s %s' % (p, '；'.join(ms)) for p, ms in by_pos.items() if ms]
+            if parts:
+                return '；'.join(parts)
         return '; '.join(self.get_meanings())
 
 

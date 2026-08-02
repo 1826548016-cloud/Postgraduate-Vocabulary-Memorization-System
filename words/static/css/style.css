@@ -282,6 +282,9 @@ body {
 .word-card .word-pos, .card-flash .word-pos {
   font-size: var(--fs-sm); color: var(--c-text-3);
 }
+.meaning-pos {
+  font-weight: 700; color: var(--c-green); margin-right: 2px;
+}
 .word-card .word-meaning, .card-flash .word-meaning {
   font-size: var(--fs-base); margin-top: 20px; padding: 16px 20px;
   background: var(--c-bg); border-radius: var(--radius-sm);

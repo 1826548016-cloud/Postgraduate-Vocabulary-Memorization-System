@@ -306,6 +306,26 @@ function focusRender() {
 }
 
 // ===== Flip Card =====
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// 优先按词性分组展示释义：v. 释义；释义
+function formatFocusMeanings(word) {
+  var byPos = (word && word.meanings_by_pos) || {};
+  var posKeys = Object.keys(byPos).filter(function (k) { return byPos[k] && byPos[k].length; });
+  if (posKeys.length) {
+    return posKeys.map(function (p) {
+      return '<span class="meaning-pos">' + escapeHtml(p) + '</span> ' +
+        byPos[p].map(function (m) { return escapeHtml(m); }).join('；');
+    }).join('<br>');
+  }
+  var meanings = word ? word.meanings : null;
+  if (Array.isArray(meanings)) return meanings.map(escapeHtml).join('；');
+  return meanings ? String(meanings) : '';
+}
+
 function focusFlip() {
   if (sessionCompleted) return;
   if (focusIndex >= focusWords.length) return;
@@ -324,7 +344,7 @@ function focusFlip() {
   } else {
     document.getElementById('focusPhonetic').textContent = word.phonetic_us || '';
     document.getElementById('focusPos').textContent = word.pos || '';
-    document.getElementById('focusMeaning').textContent = Array.isArray(word.meanings) ? word.meanings.join('；') : (word.meanings || '');
+    document.getElementById('focusMeaning').innerHTML = formatFocusMeanings(word);
     document.getElementById('focusExample').textContent = '';
     details.style.display = 'block';
 

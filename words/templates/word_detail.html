@@ -40,6 +40,16 @@
   <div class="word-pos">{{ word.pos }}</div>
   {% endif %}
 
+  {% with by_pos=word.get_meanings_by_pos %}
+  {% if by_pos %}
+  <div class="word-meaning">
+    {% for pos, ms in by_pos.items %}
+    {% if ms %}
+    <div><span class="meaning-pos">{{ pos }}</span> {{ ms|join:"；" }}</div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% else %}
   {% with meanings=word.get_meanings %}
   {% if meanings %}
   <div class="word-meaning">
@@ -47,6 +57,8 @@
     <div>{{ meaning }}</div>
     {% endfor %}
   </div>
+  {% endif %}
+  {% endwith %}
   {% endif %}
   {% endwith %}
 </div>

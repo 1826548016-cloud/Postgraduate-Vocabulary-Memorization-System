@@ -337,6 +337,19 @@
     }
   }
 
+  // 优先按词性分组展示释义：v. 释义；释义
+  function formatListMeanings(w) {
+    var byPos = (w && w.meanings_by_pos) || {};
+    var posKeys = Object.keys(byPos).filter(function (k) { return byPos[k] && byPos[k].length; });
+    if (posKeys.length) {
+      return posKeys.map(function (p) {
+        return '<span class="meaning-pos">' + escapeHtml(p) + '</span> ' +
+          byPos[p].map(function (m) { return escapeHtml(m); }).join('；');
+      }).join('<br>');
+    }
+    return escapeHtml((w.meanings || []).join('; '));
+  }
+
   function renderWords(data) {
     var tbody = document.getElementById('wordTableBody');
     tbody.innerHTML = '';
@@ -347,7 +360,7 @@
     }
     var startIndex = (data.page - 1) * perPage + 1;
     words.forEach(function (w, i) {
-      var meanings = (w.meanings || []).join('; ');
+      var meanings = formatListMeanings(w);
       var phonetic = w.phonetic_us || w.phonetic_uk || '-';
       var detailUrl = wordDetailUrlTemplate.replace('__ID__', w.id);
       var tr = document.createElement('tr');
