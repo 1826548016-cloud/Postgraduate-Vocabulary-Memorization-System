@@ -51,11 +51,13 @@
         </div>
         <div class="form-group">
           <label class="form-label">词汇类别</label>
-          <select class="form-input" id="newUnitCategory">
+          <select class="form-input" id="newUnitCategory" onchange="toggleCustomCategory('newUnitCategory', 'newUnitCategoryCustom')">
             <option value="required">必考词</option>
             <option value="basic">基础词</option>
             <option value="advanced">超纲词</option>
+            <option value="__custom__">自定义…</option>
           </select>
+          <input type="text" class="form-input hidden" id="newUnitCategoryCustom" placeholder="输入自定义词汇类别" maxlength="20" style="margin-top: 6px;">
         </div>
         <div class="flex gap-2">
           <button class="btn btn-primary btn-sm" onclick="createUnit()">创建</button>
@@ -72,11 +74,13 @@
         </div>
         <div class="form-group">
           <label class="form-label">词汇类别</label>
-          <select class="form-input" id="editUnitCategory">
+          <select class="form-input" id="editUnitCategory" onchange="toggleCustomCategory('editUnitCategory', 'editUnitCategoryCustom')">
             <option value="required">必考词</option>
             <option value="basic">基础词</option>
             <option value="advanced">超纲词</option>
+            <option value="__custom__">自定义…</option>
           </select>
+          <input type="text" class="form-input hidden" id="editUnitCategoryCustom" placeholder="输入自定义词汇类别" maxlength="20" style="margin-top: 6px;">
         </div>
         <div class="flex gap-2">
           <button class="btn btn-primary btn-sm" onclick="updateUnit()">保存</button>
@@ -698,7 +702,7 @@
             '<div class="flex items-center gap-1">' +
               '<span class="text-secondary text-sm">' + u.mastered_count + ' / ' + u.word_count + '</span>' +
               '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); location.href=AI_IMPORT_URL + \'?unit=\' + ' + u.number + '" title="AI 导入到此单元" style="padding: 2px 4px; font-size: 0.7rem;"><i class="ph ph-sparkle"></i></button>' +
-              '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); showEditUnit(' + u.number + ', \'' + escapeHtml(u.name).replace(/'/g, "\\'") + '\', \'' + u.category + '\')" title="编辑单元" style="padding: 2px 4px; font-size: 0.7rem;">✎</button>' +
+              '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); showEditUnit(' + u.number + ', \'' + escapeHtml(u.name).replace(/'/g, "\\'") + '\', \'' + escapeHtml(u.category || '').replace(/'/g, "\\'") + '\')" title="编辑单元" style="padding: 2px 4px; font-size: 0.7rem;">✎</button>' +
               '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); deleteUnit(' + u.number + ', \'' + escapeHtml(u.name).replace(/'/g, "\\'") + '\')" title="删除单元" style="padding: 2px 4px; font-size: 0.7rem;">✕</button>' +
             '</div>' +
           '</div>' +
@@ -759,6 +763,24 @@
   }
 
   // ===== Unit CRUD =====
+  // 自定义词汇类别：选择"自定义…"时显示输入框
+  function toggleCustomCategory(selectId, customId) {
+    var sel = document.getElementById(selectId);
+    var custom = document.getElementById(customId);
+    var isCustom = sel.value === '__custom__';
+    custom.classList.toggle('hidden', !isCustom);
+    if (isCustom) custom.focus();
+  }
+
+  // 解析词汇类别：选择"自定义…"时取输入框内容
+  function resolveCategory(selectId, customId) {
+    var sel = document.getElementById(selectId);
+    if (sel.value === '__custom__') {
+      return document.getElementById(customId).value.trim();
+    }
+    return sel.value;
+  }
+
   function showCreateUnit() {
     hideEditUnit();
     document.getElementById('createUnitForm').classList.remove('hidden');
@@ -768,13 +790,21 @@
     document.getElementById('createUnitForm').classList.add('hidden');
     document.getElementById('newUnitNumber').value = '';
     document.getElementById('newUnitName').value = '';
+    document.getElementById('newUnitCategory').value = 'required';
+    document.getElementById('newUnitCategoryCustom').value = '';
+    document.getElementById('newUnitCategoryCustom').classList.add('hidden');
   }
 
   function showEditUnit(number, name, category) {
     hideCreateUnit();
     document.getElementById('editUnitNumber').textContent = number;
     document.getElementById('editUnitName').value = name;
-    document.getElementById('editUnitCategory').value = category;
+    var sel = document.getElementById('editUnitCategory');
+    var custom = document.getElementById('editUnitCategoryCustom');
+    var isPreset = ['required', 'basic', 'advanced'].indexOf(category) !== -1;
+    sel.value = isPreset ? category : '__custom__';
+    custom.value = isPreset ? '' : category;
+    custom.classList.toggle('hidden', isPreset);
     document.getElementById('editUnitForm').dataset.unitNumber = number;
     document.getElementById('editUnitForm').classList.remove('hidden');
   }
@@ -786,10 +816,14 @@
   async function createUnit() {
     var number = parseInt(document.getElementById('newUnitNumber').value);
     var name = document.getElementById('newUnitName').value.trim();
-    var category = document.getElementById('newUnitCategory').value;
+    var category = resolveCategory('newUnitCategory', 'newUnitCategoryCustom');
 
     if (!number || !name) {
       showToast('请填写单元编号和名称', 'error');
+      return;
+    }
+    if (!category) {
+      showToast('请填写自定义词汇类别', 'error');
       return;
     }
 
@@ -814,10 +848,14 @@
   async function updateUnit() {
     var number = parseInt(document.getElementById('editUnitForm').dataset.unitNumber);
     var name = document.getElementById('editUnitName').value.trim();
-    var category = document.getElementById('editUnitCategory').value;
+    var category = resolveCategory('editUnitCategory', 'editUnitCategoryCustom');
 
     if (!name) {
       showToast('单元名称不能为空', 'error');
+      return;
+    }
+    if (!category) {
+      showToast('请填写自定义词汇类别', 'error');
       return;
     }
 

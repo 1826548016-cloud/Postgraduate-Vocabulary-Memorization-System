@@ -1537,15 +1537,17 @@ def api_units(request):
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_unit_create(request):
-    """创建新单元"""
+    """创建新单元（词汇类别可为必考/基础/超纲，也支持自定义）"""
     try:
         data = json.loads(request.body)
         number = int(data.get('number', 0))
         name = data.get('name', '').strip()
-        category = data.get('category', 'required')
+        category = (data.get('category') or 'required').strip()
 
         if not name:
             return JsonResponse({'error': '单元名称不能为空'}, status=400)
+        if not category or len(category) > 20:
+            return JsonResponse({'error': '词汇类别不能超过20个字符'}, status=400)
         if Unit.objects.filter(number=number).exists():
             return JsonResponse({'error': f'单元编号 {number} 已存在'}, status=400)
 
@@ -1595,13 +1597,17 @@ def api_unit_update(request, unit_number):
         data = json.loads(request.body)
         unit = get_object_or_404(Unit, number=unit_number)
         new_name = data.get('name', '').strip()
-        new_category = data.get('category', unit.category)
+        new_category = (data.get('category') or '').strip()
 
         if not new_name:
             return JsonResponse({'error': '单元名称不能为空'}, status=400)
 
         unit.name = new_name
-        if new_category in ['required', 'basic', 'advanced']:
+        if new_category:
+            if new_category == '__custom__':
+                return JsonResponse({'error': '词汇类别无效'}, status=400)
+            if len(new_category) > 20:
+                return JsonResponse({'error': '词汇类别不能超过20个字符'}, status=400)
             unit.category = new_category
         unit.save()
 
