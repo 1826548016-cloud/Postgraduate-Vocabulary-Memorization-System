@@ -11,7 +11,7 @@ from io import BytesIO
 from django.conf import settings
 from django.db.models import Q, Count, Sum, Avg
 from django.http import JsonResponse, HttpResponse, FileResponse
-from django.shortcuts import render, get_object_or_404, redirect
+from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -22,30 +22,6 @@ from .models import (Unit, Word, StudyProgress, StudyPlan,
 # ─── 帮助函数 ───────────────────────────────────────────────
 
 CHECKIN_DAILY_WORDS = 30  # 每日学习满 30 词自动打卡
-
-# ─── 登录 / 登出 ─────────────────────────────────────────────
-
-def login_view(request):
-    """登录页：单用户（settings.AUTH_USERNAME / AUTH_PASSWORD）"""
-    if request.session.get('is_logged_in'):
-        return redirect('words:dashboard')
-    error = None
-    next_url = request.GET.get('next') or request.POST.get('next') or ''
-    if request.method == 'POST':
-        username = (request.POST.get('username') or '').strip()
-        password = request.POST.get('password') or ''
-        if username == settings.AUTH_USERNAME and password == settings.AUTH_PASSWORD:
-            request.session['is_logged_in'] = True
-            request.session['username'] = username
-            return redirect(next_url or 'words:dashboard')
-        error = '用户名或密码错误'
-    return render(request, 'login.html', {'error': error, 'next': next_url})
-
-
-def logout_view(request):
-    """退出登录"""
-    request.session.flush()
-    return redirect('words:login')
 
 def update_daily_checkin():
     """更新今日打卡统计数据；今日背诵满 30 词自动打卡，返回是否刚刚自动打卡"""
@@ -220,18 +196,36 @@ def learn_session(request):
 
 
 def review_session(request):
+    """复习批次：艾宾浩斯到期词中，「不会的」随机抽取为主（约 80%），
+    「会的」也掺入少量（约 20%）巩固防止遗忘，全部遵循艾宾浩斯遗忘曲线。"""
     today = timezone.localdate()
     settings_obj = UserSettings.get_settings()
+    target = max(1, settings_obj.daily_review_target)
 
-    # 今日到期单词（含昨天未复习完顺延下来的），按到期时间排序，旧的优先
-    due_progress = StudyProgress.objects.filter(
+    # 不会的：到期未掌握词（learning / reviewing），随机抽取为主
+    unmastered_due = list(StudyProgress.objects.filter(
         next_review__lte=today,
         status__in=['learning', 'reviewing']
-    ).select_related('word').order_by('next_review')
-    total_due = due_progress.count()
+    ).select_related('word'))
+    random.shuffle(unmastered_due)
 
-    # 每日固定一批，数量取「每日复习目标」，未复习完的自动顺延到后面的批次
-    batch = due_progress[:settings_obj.daily_review_target]
+    # 会的：到期已掌握词（mastered），掺入少量防止遗忘
+    mastered_due = list(StudyProgress.objects.filter(
+        next_review__lte=today,
+        status='mastered'
+    ).select_related('word'))
+    random.shuffle(mastered_due)
+
+    # 配额：会的占约 20%（少数），不会的占约 80%（主）
+    mastered_quota = round(target * 0.2)
+    unmastered_quota = target - mastered_quota
+
+    # 某池不足时，剩余空位让给另一池，保证批次总数尽量接近目标
+    unmastered_batch = unmastered_due[:unmastered_quota]
+    mastered_batch = mastered_due[:mastered_quota + (unmastered_quota - len(unmastered_batch))]
+
+    batch = unmastered_batch + mastered_batch
+    random.shuffle(batch)  # 混合后随机出题
 
     word_data = []
     for p in batch:
@@ -250,6 +244,7 @@ def review_session(request):
             'next_review': p.next_review.isoformat() if p.next_review else '',
         })
 
+    total_due = len(unmastered_due) + len(mastered_due)
     remaining_due = max(0, total_due - len(word_data))
 
     return render(request, 'review_session.html', {
@@ -259,6 +254,8 @@ def review_session(request):
         'remaining_due': remaining_due,
         'daily_review_target': settings_obj.daily_review_target,
         'batch_date': today.isoformat(),
+        'unmastered_in_batch': len(unmastered_batch),
+        'mastered_in_batch': len(mastered_batch),
     })
 
 

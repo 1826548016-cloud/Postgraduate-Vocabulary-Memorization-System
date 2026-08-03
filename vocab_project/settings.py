@@ -29,13 +29,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'words.middleware.LoginRequiredMiddleware',
 ]
-
-# ─── 登录账号（个人使用，单用户）─────────────────────────────
-AUTH_USERNAME = 'qzx'
-AUTH_PASSWORD = '918918'
-
 ROOT_URLCONF = 'vocab_project.urls'
 
 TEMPLATES = [

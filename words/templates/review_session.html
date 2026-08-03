@@ -219,6 +219,8 @@
   var reviewCount = {{ review_count }};
   var wordsData = {{ words_json|safe }};
   var remainingDue = {{ remaining_due }};
+  var unmasteredInBatch = {{ unmastered_in_batch }};
+  var masteredInBatch = {{ mastered_in_batch }};
   var batchDate = '{{ batch_date }}';
   // 新的一天复习计划已刷新，重置上次的进度与统计
   var savedDate = sessionStorage.getItem('vocab-review-date');
@@ -458,11 +460,12 @@
   // Init (restored currentIndex, not always 0)
   if (reviewCount > 0) {
     if (els.batchInfo) {
-      if (remainingDue > 0) {
-        els.batchInfo.textContent = '今日复习计划：' + reviewCount + ' 个（另有 ' + remainingDue + ' 个到期词顺延，完成本批后可继续复习）';
-      } else {
-        els.batchInfo.textContent = '今日复习计划：' + reviewCount + ' 个';
-      }
+      var parts = [];
+      if (unmasteredInBatch > 0) parts.push('不会的 ' + unmasteredInBatch + ' 个');
+      if (masteredInBatch > 0) parts.push('会的巩固 ' + masteredInBatch + ' 个');
+      var text = '今日复习计划：' + reviewCount + ' 个（' + parts.join(' + ') + '，按艾宾浩斯曲线到期抽取）';
+      if (remainingDue > 0) text += '，另有 ' + remainingDue + ' 个到期词顺延，完成本批后可继续复习';
+      els.batchInfo.textContent = text;
     }
     renderWord(wordsData[currentIndex]);
   }

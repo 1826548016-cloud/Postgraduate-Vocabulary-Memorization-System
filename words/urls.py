@@ -6,8 +6,6 @@ app_name = 'words'
 urlpatterns = [
     # Page routes
     path('', views.dashboard, name='dashboard'),
-    path('login/', views.login_view, name='login'),
-    path('logout/', views.logout_view, name='logout'),
     path('words/', views.word_list, name='word_list'),
     path('ai-import/', views.ai_import, name='ai_import'),
     path('words/<int:word_id>/', views.word_detail, name='word_detail'),

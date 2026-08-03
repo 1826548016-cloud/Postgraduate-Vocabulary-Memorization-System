@@ -56,8 +56,6 @@
       <div class="top-bar">
         <div class="top-bar-title">{% block page_title %}考研单词背诵系统{% endblock %}</div>
         <div class="top-bar-actions">
-          <span style="display:inline-flex;align-items:center;gap:4px;font-size:0.8rem;color:var(--c-text-2);"><i class="ph ph-user-circle"></i>{{ request.session.username }}</span>
-          <a href="{% url 'words:logout' %}" class="btn btn-secondary btn-sm" title="退出登录" style="padding:6px 10px;"><i class="ph ph-sign-out"></i></a>
           <button id="themeToggle" class="btn btn-secondary btn-sm" onclick="toggleTheme()" title="切换主题">
             <i id="themeIcon" class="ph ph-moon"></i>
           </button>
