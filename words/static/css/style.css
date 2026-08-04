@@ -538,32 +538,7 @@ textarea.form-input { resize: vertical; min-height: 80px; }
   font-size: var(--fs-sm); color: var(--c-text-3); margin: 0 8px;
 }
 
-/* ===== Ebbinghaus curve bars ===== */
-.curve-container {
-  margin: 20px auto 0; max-width: 480px;
-  padding: 14px 16px; background: var(--c-bg);
-  border-radius: var(--radius-sm);
-}
-.curve-title {
-  font-size: var(--fs-xs); color: var(--c-text-3);
-  margin-bottom: 10px; text-align: center;
-}
-.curve-track { display: flex; align-items: flex-end; justify-content: center; gap: 5px; height: 90px; }
-.curve-bar {
-  width: 36px; background: var(--c-border); border-radius: 3px 3px 0 0;
-  position: relative; transition: background .3s;
-}
-.curve-bar.active { background: var(--c-green); }
-.curve-label {
-  position: absolute; bottom: -20px; left: 50%;
-  transform: translateX(-50%); font-size: .55rem; color: var(--c-text-3);
-  white-space: nowrap;
-}
-.curve-days {
-  position: absolute; top: -18px; left: 50%;
-  transform: translateX(-50%); font-size: .6rem;
-  font-weight: 600; white-space: nowrap; color: var(--c-text-2);
-}
+/* ===== Responsive ===== */
 
 /* ===== Review meta ===== */
 .review-meta {

@@ -143,8 +143,14 @@
   <div class="card-header">学习进度</div>
   <div class="card-grid">
     <div class="stat-card">
-      <div class="stat-value">{{ progress.mastery_level }}</div>
-      <div class="stat-label">掌握等级</div>
+      <div class="stat-value">
+        {% if progress.status == 'mastered' %}已掌握
+        {% elif progress.status == 'learning' %}学习中
+        {% elif progress.status == 'reviewing' %}复习中
+        {% else %}未学
+        {% endif %}
+      </div>
+      <div class="stat-label">学习状态</div>
     </div>
     <div class="stat-card">
       <div class="stat-value">{{ progress.review_count }}</div>
@@ -155,8 +161,8 @@
       <div class="stat-label">错误次数</div>
     </div>
     <div class="stat-card">
-      <div class="stat-value">{% if progress.next_review %}{{ progress.next_review }}{% else %}-{% endif %}</div>
-      <div class="stat-label">下次复习</div>
+      <div class="stat-value">{% if progress.last_review %}{{ progress.last_review|date:"Y-m-d" }}{% else %}-{% endif %}</div>
+      <div class="stat-label">上次复习</div>
     </div>
   </div>
 </div>

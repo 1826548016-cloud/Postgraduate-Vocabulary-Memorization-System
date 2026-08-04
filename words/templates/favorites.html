@@ -65,12 +65,16 @@
     <div style="margin-top: 12px;">
       <div class="flex justify-between items-center" style="margin-bottom: 4px;">
         <span class="text-sm text-secondary">
-          {% if progress.status == 'mastered' %}会{% else %}不会{% endif %}
+          {% if progress.status == 'mastered' %}<span style="color: var(--c-green);">已掌握</span>{% else %}<span style="color: var(--c-amber);">学习中</span>{% endif %}
         </span>
-        <span class="text-sm text-secondary">L{{ progress.mastery_level }}</span>
+        <span class="text-sm text-secondary">复习 {{ progress.review_count }} 次</span>
       </div>
       <div class="progress-bar">
-        <div class="progress-bar-fill" style="width: {% widthratio progress.mastery_level 5 100 %}%;"></div>
+        {% if progress.status == 'mastered' %}
+        <div class="progress-bar-fill" style="width: 100%; background: var(--c-green);"></div>
+        {% else %}
+        <div class="progress-bar-fill" style="width: 50%; background: var(--c-amber);"></div>
+        {% endif %}
       </div>
     </div>
     {% endif %}

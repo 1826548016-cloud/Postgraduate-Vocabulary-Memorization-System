@@ -9,7 +9,7 @@ from datetime import date, timedelta, datetime
 from io import BytesIO
 
 from django.conf import settings
-from django.db.models import Q, Count, Sum, Avg
+from django.db.models import Q, Count, Sum, Avg, F
 from django.http import JsonResponse, HttpResponse, FileResponse
 from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
@@ -27,10 +27,13 @@ def update_daily_checkin():
     """更新今日打卡统计数据；今日背诵满 30 词自动打卡，返回是否刚刚自动打卡"""
     today = timezone.localdate()
     checkin, _ = DailyCheckIn.objects.get_or_create(date=today)
+    # 新学：learned_date 是今天
     checkin.new_words_learned = StudyProgress.objects.filter(
-        learned_date=today, is_today_new=True).count()
+        learned_date=today).count()
+    # 复习：今天有复习记录，且 learned_date 早于今天（不是今天第一次学的词）
     checkin.words_reviewed = StudyProgress.objects.filter(
-        last_review__date=today, review_count__gt=0).count()
+        last_review__date=today, review_count__gt=0
+    ).exclude(learned_date=today).count()
     total = checkin.today_correct + checkin.today_wrong
     if total > 0:
         checkin.correct_rate = round(checkin.today_correct / total * 100, 1)
@@ -42,12 +45,6 @@ def update_daily_checkin():
         auto_checked = True
     checkin.save()
     return auto_checked
-
-def get_next_review(mastery_level):
-    """艾宾浩斯复习间隔"""
-    intervals = [1, 2, 4, 7, 15, 30]  # L0~L5
-    level = min(mastery_level, 5)
-    return timezone.localdate() + timedelta(days=intervals[level])
 
 def get_streak():
     """计算连续打卡天数"""
@@ -69,11 +66,12 @@ def dashboard(request):
     active_plan = StudyPlan.objects.filter(is_active=True).first()
 
     today_new = StudyProgress.objects.filter(
-        learned_date=today, is_today_new=True).count()
+        learned_date=today).count()
     today_review = StudyProgress.objects.filter(
-        last_review__date=today, review_count__gt=0).count()
-    review_due = StudyProgress.objects.filter(
-        next_review__lte=today, status__in=['learning', 'reviewing']).count()
+        last_review__date=today, review_count__gt=0
+    ).exclude(learned_date=today).count()
+    # 复习目标：所有已学词汇（status不为new）
+    review_due = StudyProgress.objects.exclude(status='new').count()
 
     total_words = Word.objects.count()
     mastered_words = StudyProgress.objects.filter(status='mastered').count()
@@ -196,36 +194,15 @@ def learn_session(request):
 
 
 def review_session(request):
-    """复习批次：艾宾浩斯到期词中，「不会的」随机抽取为主（约 80%），
-    「会的」也掺入少量（约 20%）巩固防止遗忘，全部遵循艾宾浩斯遗忘曲线。"""
+    """复习：从所有已学词汇中随机抽取，不再使用艾宾浩斯曲线。"""
     today = timezone.localdate()
     settings_obj = UserSettings.get_settings()
     target = max(1, settings_obj.daily_review_target)
 
-    # 不会的：到期未掌握词（learning / reviewing），随机抽取为主
-    unmastered_due = list(StudyProgress.objects.filter(
-        next_review__lte=today,
-        status__in=['learning', 'reviewing']
-    ).select_related('word'))
-    random.shuffle(unmastered_due)
-
-    # 会的：到期已掌握词（mastered），掺入少量防止遗忘
-    mastered_due = list(StudyProgress.objects.filter(
-        next_review__lte=today,
-        status='mastered'
-    ).select_related('word'))
-    random.shuffle(mastered_due)
-
-    # 配额：会的占约 20%（少数），不会的占约 80%（主）
-    mastered_quota = round(target * 0.2)
-    unmastered_quota = target - mastered_quota
-
-    # 某池不足时，剩余空位让给另一池，保证批次总数尽量接近目标
-    unmastered_batch = unmastered_due[:unmastered_quota]
-    mastered_batch = mastered_due[:mastered_quota + (unmastered_quota - len(unmastered_batch))]
-
-    batch = unmastered_batch + mastered_batch
-    random.shuffle(batch)  # 混合后随机出题
+    # 从所有已学词（status 不为 'new'）中随机抽取
+    all_progress = list(StudyProgress.objects.exclude(status='new').select_related('word'))
+    random.shuffle(all_progress)
+    batch = all_progress[:target]
 
     word_data = []
     for p in batch:
@@ -239,23 +216,23 @@ def review_session(request):
             'meanings_by_pos': w.get_meanings_by_pos(),
             'example_en': w.example_en,
             'example_zh': w.example_zh,
-            'mastery_level': p.mastery_level,
             'error_count': p.error_count,
-            'next_review': p.next_review.isoformat() if p.next_review else '',
+            'review_count': p.review_count,
+            'status': p.status,
         })
 
-    total_due = len(unmastered_due) + len(mastered_due)
-    remaining_due = max(0, total_due - len(word_data))
+    mastered_count = len([p for p in batch if p.status == 'mastered'])
+    unmastered_count = len(batch) - mastered_count
 
     return render(request, 'review_session.html', {
         'review_count': len(word_data),
         'words_json': json.dumps(word_data, ensure_ascii=False),
-        'total_due': total_due,
-        'remaining_due': remaining_due,
+        'total_due': len(all_progress),  # 总已学词数
+        'remaining_due': max(0, len(all_progress) - len(word_data)),
         'daily_review_target': settings_obj.daily_review_target,
         'batch_date': today.isoformat(),
-        'unmastered_in_batch': len(unmastered_batch),
-        'mastered_in_batch': len(mastered_batch),
+        'unmastered_in_batch': unmastered_count,
+        'mastered_in_batch': mastered_count,
     })
 
 
@@ -409,31 +386,18 @@ def api_mark_word(request, action, word_id):
             progress.learned_date = today
             progress.is_today_new = True
 
-        intervals = [1, 2, 4, 7, 15, 30]
-
         if action == 'mastered':
             progress.mastery_level = 5
-        elif action == 'fuzzy':
-            if progress.error_count > 2 and progress.mastery_level > 0:
-                progress.mastery_level = max(0, progress.mastery_level - 1)
-            else:
-                progress.mastery_level = min(progress.mastery_level + 1, 5)
-            progress.error_count += 1
-        elif action == 'unknown':
+            progress.status = 'mastered'
+        elif action in ('fuzzy', 'unknown'):
             progress.mastery_level = 0
+            progress.status = 'learning'
             progress.error_count += 1
         else:
             return JsonResponse({'error': '无效操作'}, status=400)
 
-        # 更新状态
-        if action == 'mastered':
-            progress.status = 'mastered'
-        elif action == 'unknown':
-            progress.status = 'new'
-
         progress.review_count += 1
         progress.last_review = now
-        progress.next_review = get_next_review(progress.mastery_level)
         progress.save()
 
         # 更新今日正确率统计
@@ -450,7 +414,6 @@ def api_mark_word(request, action, word_id):
             'success': True,
             'status': progress.status,
             'mastery_level': progress.mastery_level,
-            'next_review': progress.next_review.isoformat() if progress.next_review else None,
             'auto_checked': auto_checked,
         })
     except Exception as e:
@@ -469,9 +432,8 @@ def api_toggle_mastery(request, word_id):
         checkin, _ = DailyCheckIn.objects.get_or_create(date=today)
         if progress.status == 'mastered':
             # → 不会
-            progress.status = 'new'
+            progress.status = 'learning'
             progress.mastery_level = 0
-            progress.next_review = None
             progress.save()
             checkin.today_wrong += 1
             checkin.save()
@@ -488,9 +450,8 @@ def api_toggle_mastery(request, word_id):
             progress.mastery_level = 5
             progress.review_count += 1
             progress.last_review = timezone.now()
-            progress.learned_date = today
-            progress.is_today_new = True
-            progress.next_review = get_next_review(5)
+            if progress.learned_date is None:
+                progress.learned_date = today
             progress.save()
             checkin.today_correct += 1
             checkin.save()
@@ -520,26 +481,22 @@ def api_today(request):
         'meanings_by_pos': w.get_meanings_by_pos(),
     } for w in new_words]
 
-    # 今日需复习
-    review_words = Word.objects.filter(
-        progress__next_review__lte=today,
-        progress__status__in=['learning', 'reviewing'],
-    ).order_by('progress__next_review')[:settings_obj.daily_review_target]
+    # 今日需复习：从所有已学词中随机抽取
+    all_progress = list(StudyProgress.objects.exclude(status='new').select_related('word'))
+    random.shuffle(all_progress)
+    review_batch = all_progress[:settings_obj.daily_review_target]
 
     review_list = [{
-        'id': w.id,
-        'word': w.word,
-        'phonetic_us': w.phonetic_us,
-        'pos': w.pos,
-        'meanings': w.get_meanings(),
-        'meanings_by_pos': w.get_meanings_by_pos(),
-        'mastery_level': w.progress.mastery_level,
-    } for w in review_words]
+        'id': p.word.id,
+        'word': p.word.word,
+        'phonetic_us': p.word.phonetic_us,
+        'pos': p.word.pos,
+        'meanings': p.word.get_meanings(),
+        'meanings_by_pos': p.word.get_meanings_by_pos(),
+        'mastery_level': p.mastery_level,
+    } for p in review_batch]
 
-    due_count = StudyProgress.objects.filter(
-        next_review__lte=today,
-        status__in=['learning', 'reviewing']
-    ).count()
+    due_count = len(all_progress)  # 总已学词数即为待复习数
 
     return JsonResponse({
         'new_words': new_list,
@@ -653,14 +610,17 @@ def api_stats(request, period):
     checkin_map = {c.date: c for c in checkins}
 
     # 每日新学/复习数据按进度实时统计（不依赖打卡快照），保证近几天数据完整
+    # 新学：learned_date 在范围内的所有词
     new_by_day = StudyProgress.objects.filter(
-        learned_date__gte=start_date, is_today_new=True
+        learned_date__gte=start_date
     ).values('learned_date').annotate(cnt=Count('id'))
     new_map = {x['learned_date']: x['cnt'] for x in new_by_day}
 
+    # 复习：last_review 在范围内，且 learned_date 早于该日期（排除当天新学的词）
     review_by_day = StudyProgress.objects.filter(
         last_review__date__gte=start_date, review_count__gt=0
-    ).values('last_review__date').annotate(cnt=Count('id'))
+    ).exclude(learned_date__gte=F('last_review__date')) \
+     .values('last_review__date').annotate(cnt=Count('id'))
     review_map = {x['last_review__date']: x['cnt'] for x in review_by_day}
 
     # 连续日期序列：无学习记录的日期补 0，保证趋势图覆盖整个周期（含今天）
@@ -710,11 +670,11 @@ def api_stats(request, period):
 
     streak = get_streak()
 
-    # 掌握度分布
-    level_dist = []
-    for i in range(6):
-        cnt = StudyProgress.objects.filter(mastery_level=i).count()
-        level_dist.append({'level': i, 'count': cnt})
+    # 状态分布
+    status_dist = []
+    for status_code, status_label in StudyProgress.STATUS_CHOICES:
+        cnt = StudyProgress.objects.filter(status=status_code).count()
+        status_dist.append({'status': status_code, 'label': status_label, 'count': cnt})
 
     return JsonResponse({
         'days': days_data,
@@ -727,7 +687,7 @@ def api_stats(request, period):
         },
         'error_words': error_list,
         'category_progress': cat_progress,
-        'level_distribution': level_dist,
+        'level_distribution': status_dist,
     })
 
 
@@ -1485,12 +1445,11 @@ def api_exam_submit(request):
                 else:
                     # 答错（含未作答）→ 不会
                     progress.mastery_level = 0
-                    progress.status = 'new'
+                    progress.status = 'learning'
                     progress.error_count += 1
                     checkin.today_wrong += 1
                 progress.review_count += 1
                 progress.last_review = now
-                progress.next_review = get_next_review(progress.mastery_level)
                 progress.save()
                 results.append({
                     'word_id': qid,

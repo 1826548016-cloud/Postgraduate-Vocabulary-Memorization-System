@@ -51,7 +51,7 @@
       <i class="ph ph-clock ph-sm"></i> 待复习
     </div>
     <div class="stat-value">{{ review_due }}</div>
-    <div class="stat-label">到期需复习的单词</div>
+    <div class="stat-label">已学可复习单词</div>
   </div>
 
   <div class="card stat-card">
@@ -80,7 +80,7 @@
   <div class="card-header">快捷操作</div>
   <div class="flex gap-4" style="flex-wrap: wrap;">
     <a href="{% url 'words:learn_start' %}" class="btn btn-primary"><i class="ph ph-target"></i> 开始背新词</a>
-    <a href="{% url 'words:review_session' %}" class="btn btn-primary"><i class="ph ph-arrows-clockwise"></i> 开始复习</a>
+    <a href="{% url 'words:review_session' %}" class="btn btn-primary"><i class="ph ph-arrows-clockwise"></i> 复习已学单词(随机)</a>
     <a href="{% url 'words:focus_mode' %}" class="btn btn-secondary"><i class="ph ph-eye"></i> 专注模式</a>
   </div>
 </div>

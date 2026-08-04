@@ -46,63 +46,6 @@
   .word-meaning, .word-example {
     white-space: pre-line;
   }
-  /* Ebbinghaus curve */
-  .curve-container {
-    margin: 24px auto 0;
-    max-width: 500px;
-    padding: 16px;
-    background: var(--bg-secondary);
-    border-radius: var(--radius);
-  }
-  .curve-title {
-    font-size: var(--font-sm);
-    color: var(--text-secondary);
-    margin-bottom: 12px;
-    text-align: center;
-  }
-  .curve-track {
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    gap: 6px;
-    height: 100px;
-    padding: 0 12px;
-  }
-  .curve-bar {
-    width: 40px;
-    background: #e2e8f0;
-    border-radius: 4px 4px 0 0;
-    position: relative;
-    transition: background 0.3s;
-    cursor: default;
-  }
-  [data-theme="dark"] .curve-bar { background: #334155; }
-  .curve-bar.active {
-    background: #7c3aed;
-  }
-  .curve-bar.passed {
-    background: #059669;
-  }
-  .curve-label {
-    position: absolute;
-    bottom: -22px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 0.6rem;
-    color: var(--text-secondary);
-    white-space: nowrap;
-  }
-  .curve-days {
-    position: absolute;
-    top: -20px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 0.65rem;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  .curve-bar.active .curve-days { color: #7c3aed; }
-  .curve-bar.passed .curve-days { color: #059669; }
 </style>
 {% endblock %}
 
@@ -116,9 +59,10 @@
     当前没有需要复习的单词
   </div>
   <p class="text-secondary" style="margin-bottom: 24px;">
-    所有单词都在按艾宾浩斯遗忘曲线安排中，请到时间再来复习
+    你还没有学习任何单词，快去背一些新词吧！
   </p>
-  <a href="{% url 'words:dashboard' %}" class="btn btn-primary">返回仪表盘</a>
+  <a href="{% url 'words:learn_start' %}" class="btn btn-primary">开始背新词</a>
+  <a href="{% url 'words:dashboard' %}" class="btn btn-secondary" style="margin-left: 8px;">返回仪表盘</a>
 </div>
 {% else %}
 <div class="card mb-4">
@@ -146,9 +90,9 @@
   <div id="wordPos" class="word-pos">—</div>
 
   <div class="review-meta">
-    <div class="review-meta-item" id="levelBadge">掌握等级：L0</div>
+    <div class="review-meta-item" id="levelBadge">当前状态：已学</div>
     <div class="review-meta-item" id="errorBadge">历史错误：0</div>
-    <div class="review-meta-item" id="intervalBadge">下次间隔：1天</div>
+    <div class="review-meta-item" id="reviewCountBadge">复习次数：0</div>
   </div>
 
   <div id="wordMeaning" class="word-meaning hidden">—</div>
@@ -166,21 +110,6 @@
   <div class="flex justify-center gap-4 mt-6">
     <button id="prevBtn" class="btn btn-secondary">上一词 <span class="text-sm">(←)</span></button>
     <button id="nextBtn" class="btn btn-secondary">下一词 <span class="text-sm">(→)</span></button>
-  </div>
-
-  <!-- Ebbinghaus Curve -->
-  <div class="curve-container">
-    <div class="curve-title">
-      艾宾浩斯复习曲线 <span id="curveHint">— 当前词处于 L0 级</span>
-    </div>
-    <div class="curve-track" id="curveTrack">
-      <div class="curve-bar" data-lv="0" style="height: 100px;"><span class="curve-days">1天</span><span class="curve-label">L0</span></div>
-      <div class="curve-bar" data-lv="1" style="height: 80px;"><span class="curve-days">2天</span><span class="curve-label">L1</span></div>
-      <div class="curve-bar" data-lv="2" style="height: 60px;"><span class="curve-days">4天</span><span class="curve-label">L2</span></div>
-      <div class="curve-bar" data-lv="3" style="height: 40px;"><span class="curve-days">7天</span><span class="curve-label">L3</span></div>
-      <div class="curve-bar" data-lv="4" style="height: 25px;"><span class="curve-days">15天</span><span class="curve-label">L4</span></div>
-      <div class="curve-bar" data-lv="5" style="height: 18px;"><span class="curve-days">30天</span><span class="curve-label">掌握</span></div>
-    </div>
   </div>
 
   <!-- 笔记 / 速记 展开区（共享组件） -->
@@ -204,7 +133,7 @@
   <div class="flex flex-column gap-2" style="gap: 8px;">
     <a href="{% url 'words:dashboard' %}" class="btn btn-primary btn-lg">返回仪表盘</a>
     {% if remaining_due > 0 %}
-    <a href="{% url 'words:review_session' %}" class="btn btn-secondary btn-lg">继续复习下一批（剩 {{ remaining_due }} 个到期词）</a>
+    <a href="{% url 'words:review_session' %}" class="btn btn-secondary btn-lg">继续复习下一批（剩 {{ remaining_due }} 个已学词）</a>
     {% endif %}
   </div>
 </div>
@@ -237,9 +166,6 @@
   var currentWord = null;
   var revealed = false;
 
-  // Ebbinghaus intervals: L0=1, L1=2, L2=4, L3=7, L4=15, L5=30
-  var intervals = [1, 2, 4, 7, 15, 30];
-
   var counts = { mastered: 0, unknown: 0 };
   // Restore counts so refresh keeps 会/不会统计
   try {
@@ -266,9 +192,7 @@
     unknownCount: document.getElementById('unknownCount'),
     levelBadge: document.getElementById('levelBadge'),
     errorBadge: document.getElementById('errorBadge'),
-    intervalBadge: document.getElementById('intervalBadge'),
-    curveHint: document.getElementById('curveHint'),
-    curveTrack: document.getElementById('curveTrack'),
+    reviewCountBadge: document.getElementById('reviewCountBadge'),
     completionMsg: document.getElementById('completionMsg'),
   };
 
@@ -276,17 +200,6 @@
     var pct = reviewCount > 0 ? ((currentIndex + 1) / reviewCount * 100) : 0;
     els.progressText.textContent = (currentIndex + 1) + ' / ' + reviewCount;
     els.progressFill.style.width = pct + '%';
-  }
-
-  function updateCurveBar(level) {
-    var bars = els.curveTrack.querySelectorAll('.curve-bar');
-    bars.forEach(function (bar) {
-      var lv = parseInt(bar.dataset.lv);
-      bar.classList.remove('active', 'passed');
-      if (lv < level) bar.classList.add('passed');
-      if (lv === level) bar.classList.add('active');
-    });
-    els.curveHint.textContent = '— 当前词处于 L' + level + ' 级';
   }
 
   function speakWord(text) { window.VOCAB_SPEAK(text); }
@@ -322,7 +235,7 @@
     // 切换单词时收起笔记/速记展开区
     if (window.WordExtPanel) WordExtPanel.closeExtPanel();
 
-    var lv = word.mastery_level || 0;
+    var status = word.status || 'learning';
     var err = word.error_count || 0;
 
     els.wordText.textContent = word.word || '';
@@ -331,9 +244,9 @@
     els.wordMeaning.innerHTML = formatMeanings(word);
     els.wordExample.textContent = (word.example_en || '') + '\n' + (word.example_zh || '');
 
-    els.levelBadge.textContent = '掌握等级：L' + lv;
+    els.levelBadge.textContent = '当前状态：' + (status === 'mastered' ? '已掌握' : '学习中');
     els.errorBadge.textContent = '历史错误：' + err;
-    els.intervalBadge.textContent = '下次间隔：' + intervals[lv] + '天';
+    els.reviewCountBadge.textContent = '复习次数：' + (word.review_count || 0);
 
     els.wordMeaning.classList.add('hidden');
     els.wordExample.classList.add('hidden');
@@ -341,7 +254,6 @@
     els.revealBtn.disabled = false;
 
     updateProgress();
-    updateCurveBar(lv);
     speakWord(word.word || '');
   }
 
@@ -402,10 +314,10 @@
     } else if (counts.unknown > reviewCount * 0.3) {
       msg = '不少单词不太熟悉，建议重新背诵这些单词的基础释义。';
     } else {
-      msg = '复习完成，下次按时再来复习效果更好！';
+      msg = '复习完成，继续努力！';
     }
     if (remainingDue > 0) {
-      msg += ' 今日计划已完成，还有 ' + remainingDue + ' 个到期单词可在下一批继续复习。';
+      msg += ' 还有 ' + remainingDue + ' 个已学词可在下一批继续复习。';
     }
     els.completionMsg.textContent = msg;
   }
@@ -461,10 +373,10 @@
   if (reviewCount > 0) {
     if (els.batchInfo) {
       var parts = [];
-      if (unmasteredInBatch > 0) parts.push('不会的 ' + unmasteredInBatch + ' 个');
-      if (masteredInBatch > 0) parts.push('会的巩固 ' + masteredInBatch + ' 个');
-      var text = '今日复习计划：' + reviewCount + ' 个（' + parts.join(' + ') + '，按艾宾浩斯曲线到期抽取）';
-      if (remainingDue > 0) text += '，另有 ' + remainingDue + ' 个到期词顺延，完成本批后可继续复习';
+      if (unmasteredInBatch > 0) parts.push('未掌握 ' + unmasteredInBatch + ' 个');
+      if (masteredInBatch > 0) parts.push('已掌握 ' + masteredInBatch + ' 个');
+      var text = '复习模式：' + reviewCount + ' 个（' + parts.join(' + ') + '，从所有已学词汇中随机抽取）';
+      if (remainingDue > 0) text += '，剩余 ' + remainingDue + ' 个已学词可继续复习';
       els.batchInfo.textContent = text;
     }
     renderWord(wordsData[currentIndex]);

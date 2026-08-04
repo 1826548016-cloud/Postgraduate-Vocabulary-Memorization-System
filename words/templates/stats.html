@@ -64,18 +64,9 @@
 
   <!-- Mastery Level Bar Chart -->
   <div class="card">
-    <div class="card-header">掌握度分布</div>
+    <div class="card-header">学习状态分布</div>
     <div id="levelChart" style="height: 300px;"></div>
   </div>
-</div>
-
-<!-- Ebbinghaus Forgetting Curve -->
-<div class="card" style="margin-bottom: 24px;">
-  <div class="card-header">艾宾浩斯遗忘曲线</div>
-  <p class="text-sm text-secondary" style="margin-bottom: 12px;">
-    复习间隔：学习后 1天 → 2天 → 4天 → 7天 → 15天 → 30天，科学对抗遗忘
-  </p>
-  <div id="ebbinghausChart" style="height: 260px;"></div>
 </div>
 
 <!-- Error Words TOP 20 -->
@@ -104,7 +95,6 @@
 var trendChart = null;
 var categoryChart = null;
 var levelChart = null;
-var ebbinghausChart = null;
 var currentPeriod = sessionStorage.getItem('vocab-stats-period') || '7';
 
 // ===== Period Switcher =====
@@ -260,9 +250,9 @@ function renderLevelChart(levelDist) {
   if (levelChart) levelChart.dispose();
   levelChart = echarts.init(dom);
 
-  var labels = levelDist.map(function (d) { return 'L' + d.level; });
+  var labels = levelDist.map(function (d) { return d.label; });
   var data = levelDist.map(function (d) { return d.count; });
-  var colors = ['#dbeafe', '#bfdbfe', '#93c5fd', '#60a5fa', '#3b82f6', '#059669'];
+  var colors = ['#94a3b8', '#fbbf24', '#3b82f6', '#059669'];
 
   levelChart.setOption({
     tooltip: { trigger: 'axis' },
@@ -278,7 +268,7 @@ function renderLevelChart(levelDist) {
     series: [{
       type: 'bar',
       data: data.map(function(v, i) {
-        return { value: v, itemStyle: { color: colors[i], borderRadius: [4, 4, 0, 0] } };
+        return { value: v, itemStyle: { color: colors[i] || '#94a3b8', borderRadius: [4, 4, 0, 0] } };
       }),
       barWidth: '50%'
     }]
@@ -323,79 +313,9 @@ function exportPDF(type) {
   window.open('/api/export/pdf/?type=' + type, '_blank');
 }
 
-// ===== Ebbinghaus Forgetting Curve =====
-function renderEbbinghausChart() {
-  var dom = document.getElementById('ebbinghausChart');
-  if (ebbinghausChart) ebbinghausChart.dispose();
-  ebbinghausChart = echarts.init(dom);
-
-  // Simulated memory retention based on Ebbinghaus intervals
-  var days = [0, 1, 2, 4, 7, 15, 30];
-  var retentionRate = [100, 58, 44, 36, 28, 25, 21];
-  var withReview = [100, 90, 85, 80, 75, 70, 65];
-
-  ebbinghausChart.setOption({
-    tooltip: { trigger: 'axis' },
-    legend: { top: 0, data: ['自然遗忘曲线', '按时复习曲线'] },
-    grid: { left: 55, right: 20, top: 40, bottom: 30 },
-    xAxis: {
-      type: 'category',
-      data: days.map(function (d) { return d === 0 ? '学习当天' : d + '天'; }),
-      axisLabel: { rotate: 30 }
-    },
-    yAxis: {
-      type: 'value',
-      name: '记忆保留率 (%)',
-      max: 105,
-      min: 0,
-      axisLabel: { formatter: '{value}%' }
-    },
-    series: [
-      {
-        name: '自然遗忘曲线',
-        type: 'line',
-        data: retentionRate,
-        smooth: true,
-        lineStyle: { color: '#ef4444', width: 2, type: 'dashed' },
-        itemStyle: { color: '#ef4444' },
-        symbolSize: 8,
-        markLine: {
-          silent: true,
-          symbol: 'none',
-          lineStyle: { color: '#ef4444', type: 'dotted', opacity: 0.3 },
-          data: [{ yAxis: 50, label: { formatter: '遗忘临界点', fontSize: 10 } }]
-        }
-      },
-      {
-        name: '按时复习曲线',
-        type: 'line',
-        data: withReview,
-        smooth: true,
-        lineStyle: { color: '#059669', width: 3 },
-        itemStyle: { color: '#059669' },
-        areaStyle: { color: 'rgba(5,150,105,0.15)' },
-        symbolSize: 8,
-        markPoints: {
-          data: days.map(function (d, i) {
-            return {
-              coord: [i, withReview[i]],
-              value: withReview[i] + '%',
-              symbolSize: 0,
-              label: { show: false }
-            };
-          })
-        }
-      }
-    ]
-  });
-
-  window.addEventListener('resize', function () { ebbinghausChart.resize(); });
-}
-
 // ===== Initial Load =====
 document.addEventListener('DOMContentLoaded', function () {
   applyPeriodUI();
-  renderEbbinghausChart();
   loadStats();
 });
 </script>
