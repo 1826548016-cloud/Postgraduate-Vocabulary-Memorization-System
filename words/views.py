@@ -93,6 +93,28 @@ def dashboard(request):
     checkin_threshold = CHECKIN_DAILY_WORDS
     checkin_percent = min(100, round(checkin_words / checkin_threshold * 100)) if checkin_threshold else 0
 
+    # 刷题打卡热力图：近一年每日做题量（新学 + 复习），实时统计保证数据完整
+    heat_start = today - timedelta(days=364)
+    heat_new = StudyProgress.objects.filter(
+        learned_date__gte=heat_start
+    ).values('learned_date').annotate(cnt=Count('id'))
+    heat_review = StudyProgress.objects.filter(
+        last_review__date__gte=heat_start, review_count__gt=0
+    ).exclude(learned_date__gte=F('last_review__date')) \
+     .values('last_review__date').annotate(cnt=Count('id'))
+    heat_map = {}
+    for x in heat_new:
+        heat_map[x['learned_date']] = heat_map.get(x['learned_date'], 0) + x['cnt']
+    for x in heat_review:
+        d = x['last_review__date']
+        heat_map[d] = heat_map.get(d, 0) + x['cnt']
+    heatmap_days = {}
+    d = heat_start
+    while d <= today:
+        heatmap_days[d.isoformat()] = heat_map.get(d, 0)
+        d += timedelta(days=1)
+    total_study_days = sum(1 for v in heat_map.values() if v > 0)
+
     context = {
         'today_new': today_new,
         'today_review': today_review,
@@ -108,6 +130,8 @@ def dashboard(request):
         'checkin_words': checkin_words,
         'checkin_threshold': checkin_threshold,
         'checkin_percent': checkin_percent,
+        'heatmap_days': heatmap_days,
+        'total_study_days': total_study_days,
     }
     return render(request, 'dashboard.html', context)
 
@@ -1832,6 +1856,19 @@ def extract_json_array(content):
     return []
 
 
+def normalize_phonetic(ph):
+    """规范化音标：确保用 / 包裹，去除多余空白"""
+    ph = (ph or '').strip()
+    if not ph:
+        return ''
+    # 已有斜杠包裹的直接返回
+    if ph.startswith('/') and ph.endswith('/') and len(ph) > 1:
+        return ph
+    # 去除首尾零散斜杠后重新包裹
+    ph = ph.strip('/').strip()
+    return '/' + ph + '/' if ph else ''
+
+
 def normalize_ai_words(words):
     """规范化 AI 识别结果"""
     clean = []
@@ -1841,10 +1878,15 @@ def normalize_ai_words(words):
         word_text = str(w.get('word', '')).strip()
         if not word_text:
             continue
+        phonetic_us = normalize_phonetic(w.get('phonetic_us', '') or w.get('phonetic', ''))
+        phonetic_uk = normalize_phonetic(w.get('phonetic_uk', ''))
+        # 英式音标缺失时用美式填充，避免导入后音标空白
+        if not phonetic_uk and phonetic_us:
+            phonetic_uk = phonetic_us
         clean.append({
             'word': word_text,
-            'phonetic_us': str(w.get('phonetic_us', '') or w.get('phonetic', '') or '').strip(),
-            'phonetic_uk': str(w.get('phonetic_uk', '') or '').strip(),
+            'phonetic_us': phonetic_us,
+            'phonetic_uk': phonetic_uk,
             'pos': str(w.get('pos', '') or '').strip(),
             'meanings': [str(m).strip() for m in (w.get('meanings') or [])
                          if str(m).strip()],
@@ -2005,7 +2047,8 @@ def api_ai_recognize(request):
         common_rules = (
             '要求：\n'
             '1. 完整整理所有出现的单词，不要遗漏任何一个\n'
-            '2. 音标若无法准确识别可以留空\n'
+            '2. 尽量给出每个单词的美式音标（phonetic_us），用 / 包裹，如 /əˈbændən/；'
+            '若原文已标注音标则直接使用，若无法确定请根据单词拼写推断常见读音\n'
             '3. 释义使用中文，多个义项放入 meanings 数组\n'
             '4. 若包含词组/搭配，把短语作为单词输出\n'
             '5. 只输出 JSON 本身，不要输出任何多余文字、不要用代码块包裹'
@@ -2176,9 +2219,9 @@ def api_ai_review(request):
                     if m:
                         clean_fix['meanings'] = m
                 if fix.get('phonetic_us'):
-                    clean_fix['phonetic_us'] = str(fix['phonetic_us']).strip()
+                    clean_fix['phonetic_us'] = normalize_phonetic(fix['phonetic_us'])
                 if fix.get('phonetic_uk'):
-                    clean_fix['phonetic_uk'] = str(fix['phonetic_uk']).strip()
+                    clean_fix['phonetic_uk'] = normalize_phonetic(fix['phonetic_uk'])
                 if fix.get('example_en'):
                     clean_fix['example_en'] = str(fix['example_en']).strip()
                 if fix.get('example_zh'):

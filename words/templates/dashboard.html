@@ -104,6 +104,45 @@
   <div id="weeklyTrendChart" style="height: 280px;"></div>
 </div>
 
+<!-- 刷题打卡热力图 -->
+<div class="card" style="margin-bottom: 24px;">
+  <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 16px; margin-bottom: 4px;">
+    <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+      <div class="card-header" style="margin: 0; display: flex; align-items: center; gap: 6px;">
+        <i class="ph ph-calendar-dots ph-sm"></i> 刷题打卡热力图
+      </div>
+      <div class="heatmap-ranges" id="heatmapRanges">
+        <button type="button" class="heatmap-range-btn is-active" data-months="1">1个月</button>
+        <button type="button" class="heatmap-range-btn" data-months="3">3个月</button>
+        <button type="button" class="heatmap-range-btn" data-months="6">6个月</button>
+        <button type="button" class="heatmap-range-btn" data-months="12">1年</button>
+      </div>
+    </div>
+    <div class="heatmap-stats">
+      <div class="heatmap-stat">
+        <span class="heatmap-stat-value" id="heatmapTotalDays">{{ total_study_days }}</span>
+        <span class="heatmap-stat-label">总做题天数</span>
+      </div>
+      <div class="heatmap-stat">
+        <span class="heatmap-stat-value" style="color: var(--c-green);">{{ streak }}</span>
+        <span class="heatmap-stat-label">连续打卡天数</span>
+      </div>
+    </div>
+  </div>
+  <p class="text-secondary" style="font-size: var(--fs-sm); margin: 0 0 16px 0;">每日做题量热力图，格子颜色越深代表当天学习越多</p>
+  {{ heatmap_days|json_script:"heatmap-data" }}
+  <div id="checkinHeatmap"></div>
+  <div class="heatmap-legend">
+    <span>少</span>
+    <span class="heatmap-legend-cell" data-level="0"></span>
+    <span class="heatmap-legend-cell" data-level="1"></span>
+    <span class="heatmap-legend-cell" data-level="2"></span>
+    <span class="heatmap-legend-cell" data-level="3"></span>
+    <span class="heatmap-legend-cell" data-level="4"></span>
+    <span>多</span>
+  </div>
+</div>
+
 <!-- Overall progress -->
 <div class="card" style="margin-bottom: 24px;">
   <div class="card-header">总体进度</div>
@@ -174,31 +213,87 @@
       weeklyChart = echarts.init(dom);
 
       weeklyChart.setOption({
-        tooltip: { trigger: 'axis' },
-        legend: { top: 0, data: ['新学词数', '复习词数'] },
-        grid: { left: 50, right: 20, top: 40, bottom: 30 },
+        tooltip: {
+          trigger: 'axis',
+          backgroundColor: 'rgba(255,255,255,0.96)',
+          borderColor: '#e5e7eb',
+          borderWidth: 1,
+          padding: [10, 14],
+          textStyle: { color: '#1f2937', fontSize: 13 },
+          extraCssText: 'box-shadow: 0 6px 24px rgba(0,0,0,0.08); border-radius: 10px;',
+          axisPointer: {
+            type: 'line',
+            lineStyle: { color: '#cbd5e1', width: 1 }
+          }
+        },
+        legend: {
+          top: 0,
+          right: 0,
+          icon: 'circle',
+          itemWidth: 10,
+          itemHeight: 10,
+          itemGap: 20,
+          textStyle: { color: '#6b7280', fontSize: 13 }
+        },
+        grid: { left: 10, right: 20, top: 36, bottom: 8, containLabel: true },
         xAxis: {
           type: 'category',
           data: labels,
-          axisLabel: { rotate: labels.length > 7 ? 45 : 0 }
+          boundaryGap: false,
+          axisLine: { lineStyle: { color: '#e5e7eb' } },
+          axisTick: { show: false },
+          axisLabel: {
+            color: '#9ca3af',
+            fontSize: 12,
+            rotate: labels.length > 7 ? 45 : 0
+          }
         },
         yAxis: {
           type: 'value',
-          minInterval: 1
+          minInterval: 1,
+          axisLine: { show: false },
+          axisTick: { show: false },
+          axisLabel: { color: '#9ca3af', fontSize: 12 },
+          splitLine: { lineStyle: { color: '#f3f4f6', type: 'dashed' } }
         },
         series: [
           {
             name: '新学词数',
-            type: 'bar',
+            type: 'line',
             data: newData,
-            itemStyle: { color: '#059669', borderRadius: [4, 4, 0, 0] },
-            barGap: '20%'
+            smooth: true,
+            stack: 'total',
+            symbol: 'circle',
+            symbolSize: 6,
+            showSymbol: false,
+            lineStyle: { width: 2, color: '#059669' },
+            itemStyle: { color: '#059669', borderColor: '#fff', borderWidth: 2 },
+            areaStyle: {
+              color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                { offset: 0, color: 'rgba(5,150,105,0.35)' },
+                { offset: 1, color: 'rgba(5,150,105,0.02)' }
+              ])
+            },
+            emphasis: { focus: 'series' }
           },
           {
             name: '复习词数',
-            type: 'bar',
+            type: 'line',
             data: reviewData,
-            itemStyle: { color: '#7c3aed', borderRadius: [4, 4, 0, 0] }
+            smooth: true,
+            stack: 'total',
+            symbol: 'circle',
+            symbolSize: 6,
+            showSymbol: false,
+            lineStyle: { width: 2, color: '#7c3aed' },
+            itemStyle: { color: '#7c3aed', borderColor: '#fff', borderWidth: 2 },
+            areaStyle: {
+              color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                { offset: 0, color: 'rgba(124,58,237,0.35)' },
+                { offset: 1, color: 'rgba(124,58,237,0.02)' }
+              ])
+            },
+            emphasis: { focus: 'series' }
           }
         ]
       });
@@ -211,9 +306,173 @@
 
   // 打卡已改为自动：每日学习满 {{ checkin_threshold }} 词自动打卡，无需手动操作
 
+  // ===== 刷题打卡热力图（GitHub 贡献网格风格）=====
+  var heatRangeMonths = 1; // 默认展示 1 个月，可切换 3/6/12 个月
+
+  function renderCheckinHeatmap() {
+    var dataEl = document.getElementById('heatmap-data');
+    var wrap = document.getElementById('checkinHeatmap');
+    if (!dataEl || !wrap) return;
+
+    var dayMap = {};
+    try { dayMap = JSON.parse(dataEl.textContent); } catch (e) { return; }
+
+    var LEVEL_COLORS = ['var(--heat-empty)', '#9be9a8', '#40c463', '#30a14e', '#216e39'];
+    var GAP = 3;
+
+    function levelOf(count) {
+      if (count <= 0) return 0;
+      if (count < 10) return 1;
+      if (count < 20) return 2;
+      if (count < 35) return 3;
+      return 4;
+    }
+    function iso(dt) {
+      var y = dt.getFullYear();
+      var m = ('0' + (dt.getMonth() + 1)).slice(-2);
+      var d = ('0' + dt.getDate()).slice(-2);
+      return y + '-' + m + '-' + d;
+    }
+    function dow(dt) { return (dt.getDay() + 6) % 7; } // 0=周一 … 6=周日
+    function attachTip(cell) {
+      cell.addEventListener('mouseenter', function (e) { showHeatTip(e, cell); });
+      cell.addEventListener('mouseleave', hideHeatTip);
+    }
+
+    // 格子大小：范围越短格子越大
+    var CELL_BY_RANGE = { 1: 22, 3: 20, 6: 16, 12: 12 };
+    var CELL = CELL_BY_RANGE[heatRangeMonths] || 14;
+
+    // 按自然月渲染：1 个月只显示当前月，其余范围显示最近 N 个自然月
+    var now = new Date();
+    var months = [];
+    for (var i = heatRangeMonths - 1; i >= 0; i--) {
+      var t = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({ y: t.getFullYear(), m: t.getMonth() });
+    }
+
+    // 清空后重绘
+    wrap.innerHTML = '';
+    var container = document.createElement('div');
+    container.className = 'heatmap-months';
+
+    var totalInRange = 0;
+
+    months.forEach(function (mo, idx) {
+      var first = new Date(mo.y, mo.m, 1);
+      var last = new Date(mo.y, mo.m + 1, 0);
+
+      // 完整周对齐：从 1 号所在周的周一开始，到月末所在周的周日结束，保证日期连续
+      var gridStart = new Date(first);
+      gridStart.setDate(first.getDate() - dow(first));
+      var gridEnd = new Date(last);
+      gridEnd.setDate(last.getDate() + (6 - dow(last)));
+      var weeks = (Math.round((gridEnd - gridStart) / 86400000) + 1) / 7;
+
+      // 月份标题：居中于该月区域上方；年份变化时带上年份
+      var block = document.createElement('div');
+      block.className = 'heatmap-month-block';
+      var titleText = (mo.m + 1) + '月';
+      if (idx === 0 || mo.y !== months[idx - 1].y) titleText = mo.y + '年' + titleText;
+      var title = document.createElement('div');
+      title.className = 'heatmap-month-title';
+      title.textContent = titleText;
+      block.appendChild(title);
+
+      // 网格：第 1 行为星期表头（一~日），下方为日期格子
+      var grid = document.createElement('div');
+      grid.className = 'heatmap-month-grid';
+      grid.style.gridTemplateColumns = 'repeat(7, ' + CELL + 'px)';
+      grid.style.gridTemplateRows = '16px repeat(' + weeks + ', ' + CELL + 'px)';
+      grid.style.gap = GAP + 'px';
+
+      ['一', '二', '三', '四', '五', '六', '日'].forEach(function (t, i) {
+        var s = document.createElement('span');
+        s.className = 'heatmap-dow';
+        s.textContent = t;
+        s.style.gridColumn = (i + 1);
+        s.style.gridRow = 1;
+        grid.appendChild(s);
+      });
+
+      // 日期格子：本月日期显示学习量，跨月首尾几天置灰占位，保证每周完整
+      var d = new Date(gridStart);
+      var weekRow = 1;
+      while (d <= gridEnd) {
+        var inMonth = d.getMonth() === mo.m;
+        var cell = document.createElement('div');
+        cell.className = 'heatmap-cell' + (inMonth ? '' : ' is-other');
+        cell.style.gridColumn = (dow(d) + 1);
+        cell.style.gridRow = (weekRow + 1);
+        if (inMonth) {
+          var count = dayMap[iso(d)] || 0;
+          cell.style.background = LEVEL_COLORS[levelOf(count)];
+          cell.dataset.count = count;
+          cell.dataset.date = iso(d);
+          attachTip(cell);
+          if (count > 0) totalInRange++;
+        } else {
+          cell.style.background = 'var(--heat-empty)';
+        }
+        grid.appendChild(cell);
+        if (dow(d) === 6) weekRow++;
+        d.setDate(d.getDate() + 1);
+      }
+
+      block.appendChild(grid);
+      container.appendChild(block);
+    });
+
+    wrap.appendChild(container);
+
+    // 更新"总做题天数"为当前范围内（当月有效学习天数）
+    var totalEl = document.getElementById('heatmapTotalDays');
+    if (totalEl) totalEl.textContent = totalInRange;
+  }
+
+  // 热力图悬浮提示
+  var heatTip = null;
+  function showHeatTip(e, cell) {
+    if (!heatTip) {
+      heatTip = document.createElement('div');
+      heatTip.className = 'heatmap-tooltip';
+      document.body.appendChild(heatTip);
+    }
+    var d = new Date(cell.dataset.date + 'T00:00:00');
+    var txt = d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+    var cnt = parseInt(cell.dataset.count, 10);
+    heatTip.innerHTML = '<strong>' + txt + '</strong><br/>' + (cnt > 0 ? '学习 ' + cnt + ' 词' : '未学习');
+    heatTip.style.display = 'block';
+    moveHeatTip(e);
+  }
+  function moveHeatTip(e) {
+    if (!heatTip || heatTip.style.display === 'none') return;
+    var rect = heatTip.getBoundingClientRect();
+    var x = e.clientX + 12, y = e.clientY + 12;
+    if (x + rect.width > window.innerWidth - 8) x = e.clientX - rect.width - 12;
+    if (y + rect.height > window.innerHeight - 8) y = e.clientY - rect.height - 12;
+    heatTip.style.left = x + 'px';
+    heatTip.style.top = y + 'px';
+  }
+  function hideHeatTip() {
+    if (heatTip) heatTip.style.display = 'none';
+  }
+  document.addEventListener('mousemove', moveHeatTip);
+
+  // 范围切换
+  document.querySelectorAll('.heatmap-range-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      heatRangeMonths = parseInt(this.dataset.months, 10) || 1;
+      document.querySelectorAll('.heatmap-range-btn').forEach(function (b) { b.classList.remove('is-active'); });
+      this.classList.add('is-active');
+      renderCheckinHeatmap();
+    });
+  });
+
   // Load chart on page ready
   document.addEventListener('DOMContentLoaded', function () {
     loadWeeklyTrend();
+    renderCheckinHeatmap();
   });
 </script>
 {% endblock %}

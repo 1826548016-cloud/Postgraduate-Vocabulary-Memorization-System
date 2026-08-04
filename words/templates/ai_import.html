@@ -600,53 +600,104 @@
     var model = getSelectedAIModel();
     if (!model) { showToast('尚未配置可用模型，请先到「设置 → AI 模型」中添加并启用', 'error'); return; }
 
-    // 模型配置已统一保存在设置页，后端会根据 model_id 读取 API 密钥等信息
-    var payload = {
-      model_id: model.id,
-    };
-
-    if (aiSource === 'image') {
-      if (!aiImageB64) { showToast('请先上传图片', 'error'); return; }
-      if (!isVisionModel(model)) {
-        showToast('「' + (model.display_name || model.model_id) + '」不支持图片识别，请切换到「纯文本」或「文件」方式，或在「设置 → AI 模型」中选择带（视觉）标记的模型', 'error');
-        return;
-      }
-      payload.image = aiImageB64;
-    } else if (aiSource === 'text') {
-      var txt = document.getElementById('aiTextInput').value.trim();
-      if (!txt) { showToast('请粘贴要识别的单词文本', 'error'); return; }
-      payload.text_content = txt;
-    } else if (aiSource === 'file') {
-      if (!aiFileContent) { showToast('请先上传文本文件', 'error'); return; }
-      payload.file_content = aiFileContent;
-      payload.file_name = aiFileName;
-    }
-
     var btn = document.getElementById('aiRecognizeBtn');
     btn.disabled = true;
     btn.innerHTML = '<i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i> 识别中…';
+    clearAILog();
 
     try {
-      var res = await VOCAB_API.post('/api/ai/recognize/', payload);
-      if (res.words) {
-        aiWords = res.words.map(function (w) {
-          w.checked = true;
-          return w;
-        });
-        clearAILog();
-        appendAILog('识别完成：共 ' + aiWords.length + ' 个单词，请依次完成「AI 复审 → 人工复审 → 随机抽审」后再导入');
-        aiReviewState = { ai: false, human: false, sample: false };
-        renderAIResults();
-        renderAIReviewStatus();
-        document.getElementById('aiConfigPane').classList.add('hidden');
-        document.getElementById('aiResultPane').classList.remove('hidden');
-        document.getElementById('aiResultPane').scrollIntoView({ behavior: 'smooth', block: 'start' });
-        // 识别成功立即保存草稿，中断也不丢失
-        saveAIDraft();
+      var words = [];
+
+      if (aiSource === 'image') {
+        // ===== 图片识别：单次调用 + 分阶段进度提示 =====
+        if (!aiImageB64) { showToast('请先上传图片', 'error'); return; }
+        if (!isVisionModel(model)) {
+          showToast('「' + (model.display_name || model.model_id) + '」不支持图片识别，请切换到「纯文本」或「文件」方式，或在「设置 → AI 模型」中选择带（视觉）标记的模型', 'error');
+          return;
+        }
+        setAIProgress(0, 3, '正在上传图片…');
+        appendAILog('正在发送图片到 AI…');
+        setAIProgress(1, 3, 'AI 正在识别图片中的单词…');
+        var res = await VOCAB_API.post('/api/ai/recognize/', { model_id: model.id, image: aiImageB64 });
+        if (!res.words) throw { error: res.error || '识别失败' };
+        words = res.words;
+        setAIProgress(3, 3, '识别完成');
+
       } else {
-        showToast(res.error || '识别失败', 'error');
+        // ===== 文本/文件识别：分批调用 + 真实进度条 =====
+        var text = '', fileName = '';
+        if (aiSource === 'text') {
+          text = document.getElementById('aiTextInput').value.trim();
+          if (!text) { showToast('请粘贴要识别的单词文本', 'error'); return; }
+        } else {
+          if (!aiFileContent) { showToast('请先上传文本文件', 'error'); return; }
+          text = aiFileContent;
+          fileName = aiFileName;
+        }
+
+        // 按非空行拆分，每批最多 80 行
+        var lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
+        var BATCH = 80;
+
+        if (lines.length <= BATCH) {
+          // 小文本：单次调用 + 阶段进度
+          setAIProgress(0, 2, 'AI 正在识别单词…');
+          appendAILog('正在调用 AI 识别…');
+          var payload = { model_id: model.id };
+          if (aiSource === 'text') payload.text_content = text;
+          else { payload.file_content = text; payload.file_name = fileName; }
+          setAIProgress(1, 2, 'AI 正在识别单词…');
+          var res = await VOCAB_API.post('/api/ai/recognize/', payload);
+          if (!res.words) throw { error: res.error || '识别失败' };
+          words = res.words;
+          setAIProgress(2, 2, '识别完成');
+        } else {
+          // 大文本：分批识别，逐批显示进度
+          var batches = [];
+          for (var i = 0; i < lines.length; i += BATCH) {
+            batches.push(lines.slice(i, i + BATCH).join('\n'));
+          }
+          appendAILog('内容较长（' + lines.length + ' 行），分 ' + batches.length + ' 批识别');
+          setAIProgress(0, batches.length, '准备识别…');
+
+          for (var k = 0; k < batches.length; k++) {
+            appendAILog('正在识别第 ' + (k + 1) + '/' + batches.length + ' 批…');
+            setAIProgress(k, batches.length, '第 ' + (k + 1) + '/' + batches.length + ' 批');
+            var payload = { model_id: model.id };
+            if (aiSource === 'text') payload.text_content = batches[k];
+            else { payload.file_content = batches[k]; payload.file_name = fileName; }
+            var res = await VOCAB_API.post('/api/ai/recognize/', payload);
+            if (res.words) {
+              words = words.concat(res.words);
+              appendAILog('第 ' + (k + 1) + ' 批完成：识别 ' + res.words.length + ' 个单词（累计 ' + words.length + '）');
+            }
+            setAIProgress(k + 1, batches.length, '第 ' + (k + 1) + '/' + batches.length + ' 批完成');
+          }
+        }
       }
+
+      // 合并结果
+      aiWords = words.map(function (w) { w.checked = true; return w; });
+      // 按单词去重（分批识别可能出现重复）
+      var seen = {};
+      aiWords = aiWords.filter(function (w) {
+        var key = (w.word || '').toLowerCase();
+        if (seen[key]) return false;
+        seen[key] = true;
+        return true;
+      });
+      appendAILog('识别完成：共 ' + aiWords.length + ' 个单词，请依次完成「AI 复审 → 人工复审 → 随机抽审」后再导入', 'c-green');
+      finishAIProgress('识别完成');
+
+      aiReviewState = { ai: false, human: false, sample: false };
+      renderAIResults();
+      renderAIReviewStatus();
+      document.getElementById('aiConfigPane').classList.add('hidden');
+      document.getElementById('aiResultPane').classList.remove('hidden');
+      document.getElementById('aiResultPane').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      saveAIDraft();
     } catch (e) {
+      appendAILog('识别出错：' + (e.error || e.message || '请求失败'), 'c-red');
       showToast(e.error || e.message || '识别请求失败', 'error');
     } finally {
       btn.disabled = false;

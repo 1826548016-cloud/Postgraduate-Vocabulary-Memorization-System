@@ -44,6 +44,9 @@
   --c-amber: #d97706;
   --c-amber-bg: #fffbeb;
 
+  /* 热力图空白格颜色（浅色/白底） */
+  --heat-empty: #ebedf0;
+
   --shadow: 0 1px 3px rgba(0,0,0,.05), 0 1px 2px rgba(0,0,0,.04);
   --shadow-md: 0 4px 12px rgba(0,0,0,.06), 0 2px 4px rgba(0,0,0,.04);
   --shadow-lg: 0 8px 24px rgba(0,0,0,.08);
@@ -72,6 +75,8 @@
   --c-purple-bg: #1e1933;
   --c-amber: #fbbf24;
   --c-amber-bg: #261e08;
+
+  --heat-empty: #2d333b;
 
   --shadow: 0 1px 3px rgba(0,0,0,.15);
   --shadow-md: 0 4px 12px rgba(0,0,0,.2);
@@ -614,4 +619,78 @@ textarea.form-input { resize: vertical; min-height: 80px; }
   .wordlist-layout { flex-direction: column; }
   .wordlist-side { flex: 0 0 auto; width: 100%; }
   .stat-value { font-size: var(--fs-xl); }
+}
+
+/* ===== 刷题打卡热力图（GitHub 贡献网格风格）===== */
+.heatmap-stats {
+  display: flex; gap: 28px;
+}
+.heatmap-stat {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.heatmap-stat-value {
+  font-size: var(--fs-xl); font-weight: 700; color: var(--c-text); line-height: 1.1;
+}
+.heatmap-stat-label {
+  font-size: var(--fs-xs); color: var(--c-text-3);
+}
+
+.heatmap-ranges {
+  display: inline-flex; gap: 4px; flex-wrap: wrap;
+}
+.heatmap-range-btn {
+  border: 1px solid var(--c-border); background: transparent;
+  color: var(--c-text-2); font-size: var(--fs-xs);
+  border-radius: var(--radius-sm); padding: 4px 12px; cursor: pointer;
+  line-height: 1.5; transition: all .15s ease;
+}
+.heatmap-range-btn:hover { color: var(--c-text); border-color: var(--c-text-3); }
+.heatmap-range-btn.is-active {
+  background: var(--c-green); border-color: var(--c-green); color: #fff;
+}
+
+#checkinHeatmap { overflow-x: auto; }
+.heatmap-months {
+  display: flex; flex-wrap: wrap; justify-content: center;
+  gap: 28px 36px;
+}
+.heatmap-month-block {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.heatmap-month-title {
+  font-size: var(--fs-sm); font-weight: 600; color: var(--c-text-2);
+}
+.heatmap-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 12px);
+  grid-template-rows: 16px repeat(6, 12px);
+  gap: 3px;
+}
+.heatmap-dow {
+  font-size: 10px; color: var(--c-text-3); line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.heatmap-cell { border-radius: 2px; }
+.heatmap-cell.is-other { opacity: 0.35; }
+.heatmap-cell:hover {
+  outline: 1px solid var(--c-text-2); outline-offset: 1px;
+}
+.heatmap-legend {
+  display: flex; align-items: center; justify-content: center;
+  gap: 4px; margin-top: 12px;
+  font-size: var(--fs-xs); color: var(--c-text-3);
+}
+.heatmap-legend-cell { width: 12px; height: 12px; border-radius: 2px; }
+.heatmap-legend-cell[data-level="0"] { background: var(--heat-empty); }
+.heatmap-legend-cell[data-level="1"] { background: #9be9a8; }
+.heatmap-legend-cell[data-level="2"] { background: #40c463; }
+.heatmap-legend-cell[data-level="3"] { background: #30a14e; }
+.heatmap-legend-cell[data-level="4"] { background: #216e39; }
+
+.heatmap-tooltip {
+  position: fixed; z-index: 100;
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: 6px; box-shadow: var(--shadow-md);
+  padding: 8px 10px; font-size: var(--fs-sm); color: var(--c-text);
+  pointer-events: none; display: none;
 }
