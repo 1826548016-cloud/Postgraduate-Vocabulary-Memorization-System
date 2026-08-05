@@ -215,11 +215,11 @@
       weeklyChart.setOption({
         tooltip: {
           trigger: 'axis',
-          backgroundColor: 'rgba(255,255,255,0.96)',
-          borderColor: '#e5e7eb',
+          backgroundColor: 'rgba(253,250,241,0.96)',
+          borderColor: '#e3d8c1',
           borderWidth: 1,
           padding: [10, 14],
-          textStyle: { color: '#1f2937', fontSize: 13 },
+          textStyle: { color: '#37332a', fontSize: 13 },
           extraCssText: 'box-shadow: 0 6px 24px rgba(0,0,0,0.08); border-radius: 10px;',
           axisPointer: {
             type: 'line',
@@ -233,17 +233,17 @@
           itemWidth: 10,
           itemHeight: 10,
           itemGap: 20,
-          textStyle: { color: '#6b7280', fontSize: 13 }
+          textStyle: { color: '#7a705d', fontSize: 13 }
         },
         grid: { left: 10, right: 20, top: 36, bottom: 8, containLabel: true },
         xAxis: {
           type: 'category',
           data: labels,
           boundaryGap: false,
-          axisLine: { lineStyle: { color: '#e5e7eb' } },
+          axisLine: { lineStyle: { color: '#e3d8c1' } },
           axisTick: { show: false },
           axisLabel: {
-            color: '#9ca3af',
+          color: '#a89d87',
             fontSize: 12,
             rotate: labels.length > 7 ? 45 : 0
           }
@@ -253,8 +253,8 @@
           minInterval: 1,
           axisLine: { show: false },
           axisTick: { show: false },
-          axisLabel: { color: '#9ca3af', fontSize: 12 },
-          splitLine: { lineStyle: { color: '#f3f4f6', type: 'dashed' } }
+          axisLabel: { color: '#a89d87', fontSize: 12 },
+          splitLine: { lineStyle: { color: '#ece3cf', type: 'dashed' } }
         },
         series: [
           {
@@ -266,12 +266,12 @@
             symbol: 'circle',
             symbolSize: 6,
             showSymbol: false,
-            lineStyle: { width: 2, color: '#059669' },
-            itemStyle: { color: '#059669', borderColor: '#fff', borderWidth: 2 },
+          lineStyle: { width: 2, color: '#3f5c45' },
+          itemStyle: { color: '#3f5c45', borderColor: '#fff', borderWidth: 2 },
             areaStyle: {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: 'rgba(5,150,105,0.35)' },
-                { offset: 1, color: 'rgba(5,150,105,0.02)' }
+          { offset: 0, color: 'rgba(63,92,69,0.35)' },
+          { offset: 1, color: 'rgba(63,92,69,0.02)' }
               ])
             },
             emphasis: { focus: 'series' }
@@ -285,12 +285,12 @@
             symbol: 'circle',
             symbolSize: 6,
             showSymbol: false,
-            lineStyle: { width: 2, color: '#7c3aed' },
-            itemStyle: { color: '#7c3aed', borderColor: '#fff', borderWidth: 2 },
+          lineStyle: { width: 2, color: '#8a6f9e' },
+          itemStyle: { color: '#8a6f9e', borderColor: '#fff', borderWidth: 2 },
             areaStyle: {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: 'rgba(124,58,237,0.35)' },
-                { offset: 1, color: 'rgba(124,58,237,0.02)' }
+          { offset: 0, color: 'rgba(138,111,158,0.35)' },
+          { offset: 1, color: 'rgba(138,111,158,0.02)' }
               ])
             },
             emphasis: { focus: 'series' }
@@ -317,7 +317,7 @@
     var dayMap = {};
     try { dayMap = JSON.parse(dataEl.textContent); } catch (e) { return; }
 
-    var LEVEL_COLORS = ['var(--heat-empty)', '#9be9a8', '#40c463', '#30a14e', '#216e39'];
+  var LEVEL_COLORS = ['var(--heat-empty)', '#d3e2cb', '#a3bfa0', '#719375', '#3f5c45'];
     var GAP = 3;
 
     function levelOf(count) {

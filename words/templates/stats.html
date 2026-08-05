@@ -160,7 +160,7 @@ function renderTrendChart(days) {
           total += p.value;
           html += p.marker + ' ' + p.seriesName + ': ' + p.value + '<br/>';
         });
-        html += '<hr style="margin:4px 0;border:none;border-top:1px solid #ddd"/>';
+  html += '<hr style="margin:4px 0;border:none;border-top:1px solid #e3d8c1"/>';
         html += '<strong>总计: ' + total + '</strong>';
         return html;
       }
@@ -182,9 +182,9 @@ function renderTrendChart(days) {
         type: 'line',
         stack: 'total',
         smooth: true,
-        lineStyle: { color: '#059669', width: 2 },
-        itemStyle: { color: '#059669' },
-        areaStyle: { color: 'rgba(5,150,105,0.2)' },
+          lineStyle: { color: '#3f5c45', width: 2 },
+          itemStyle: { color: '#3f5c45' },
+          areaStyle: { color: 'rgba(63,92,69,0.2)' },
         symbolSize: 6,
         data: newData
       },
@@ -193,9 +193,9 @@ function renderTrendChart(days) {
         type: 'line',
         stack: 'total',
         smooth: true,
-        lineStyle: { color: '#7c3aed', width: 2 },
-        itemStyle: { color: '#7c3aed' },
-        areaStyle: { color: 'rgba(124,58,237,0.2)' },
+          lineStyle: { color: '#8a6f9e', width: 2 },
+          itemStyle: { color: '#8a6f9e' },
+          areaStyle: { color: 'rgba(138,111,158,0.2)' },
         symbolSize: 6,
         data: reviewData
       }
@@ -212,7 +212,7 @@ function renderCategoryChart(catProgress) {
   categoryChart = echarts.init(dom);
 
   var pieData = [];
-  var colors = ['#059669', '#3b82f6', '#f59e0b'];
+  var colors = ['#3f5c45', '#4f6f93', '#a97b24'];
   var i = 0;
   for (var code in catProgress) {
     var c = catProgress[code];
@@ -252,7 +252,7 @@ function renderLevelChart(levelDist) {
 
   var labels = levelDist.map(function (d) { return d.label; });
   var data = levelDist.map(function (d) { return d.count; });
-  var colors = ['#94a3b8', '#fbbf24', '#3b82f6', '#059669'];
+  var colors = ['#a89d87', '#d4a64f', '#4f6f93', '#3f5c45'];
 
   levelChart.setOption({
     tooltip: { trigger: 'axis' },
@@ -268,7 +268,7 @@ function renderLevelChart(levelDist) {
     series: [{
       type: 'bar',
       data: data.map(function(v, i) {
-        return { value: v, itemStyle: { color: colors[i] || '#94a3b8', borderRadius: [4, 4, 0, 0] } };
+    return { value: v, itemStyle: { color: colors[i] || '#a89d87', borderRadius: [4, 4, 0, 0] } };
       }),
       barWidth: '50%'
     }]
