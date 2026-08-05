@@ -113,6 +113,11 @@
           <option value="mastered">会</option>
           <option value="unknown">不会</option>
         </select>
+        <select id="sortFilter" class="form-input" style="width: 140px;">
+          <option value="">默认排序</option>
+          <option value="alpha">A → Z</option>
+          <option value="alpha_desc">Z → A</option>
+        </select>
       </div>
     </div>
 
@@ -296,10 +301,12 @@
     var category = document.getElementById('categoryFilter').value;
     var unit = document.getElementById('unitFilter').value;
     var status = document.getElementById('statusFilter').value;
+    var sort = document.getElementById('sortFilter').value;
     if (search) params.set('search', search);
     if (category) params.set('category', category);
     if (unit) params.set('unit', unit);
     if (status) params.set('status', status);
+    if (sort) params.set('sort', sort);
     params.set('page', page || 1);
     params.set('per_page', perPage);
     return '/api/words/?' + params.toString();
@@ -312,6 +319,7 @@
       category: document.getElementById('categoryFilter').value,
       unit: document.getElementById('unitFilter').value,
       status: document.getElementById('statusFilter').value,
+      sort: document.getElementById('sortFilter').value,
       page: currentPage
     };
     sessionStorage.setItem('vocab-wordlist', JSON.stringify(state));
@@ -325,6 +333,7 @@
       if (s.category) document.getElementById('categoryFilter').value = s.category;
       if (s.unit) document.getElementById('unitFilter').value = s.unit;
       if (s.status) document.getElementById('statusFilter').value = s.status;
+      if (s.sort) document.getElementById('sortFilter').value = s.sort;
       if (s.page) currentPage = s.page;
     } catch (e) {}
   }
@@ -489,7 +498,7 @@
   });
 
   // Auto-search on filter changes
-  ['categoryFilter', 'unitFilter', 'statusFilter'].forEach(function (id) {
+  ['categoryFilter', 'unitFilter', 'statusFilter', 'sortFilter'].forEach(function (id) {
     document.getElementById(id).addEventListener('change', function () { loadWords(1); });
   });
 

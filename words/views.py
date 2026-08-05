@@ -17,7 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from .models import (Unit, Word, StudyProgress, StudyPlan,
-                     DailyCheckIn, Favorite, Note, QuickMemory, AIModel, StudySession, UserSettings, ChatMessage)
+                     DailyCheckIn, Favorite, Note, QuickMemory, AIModel, StudySession, UserSettings, ChatMessage, ImportLog)
 
 # ─── 帮助函数 ───────────────────────────────────────────────
 
@@ -310,6 +310,7 @@ def api_words(request):
     category = request.GET.get('category', '')
     unit = request.GET.get('unit', '')
     status = request.GET.get('status', '')
+    sort = request.GET.get('sort', '')
     page = int(request.GET.get('page', 1))
     per_page = int(request.GET.get('per_page', 50))
 
@@ -328,6 +329,12 @@ def api_words(request):
             )
         else:
             qs = qs.filter(progress__status=status)
+
+    # 排序：alpha=按单词字母序，空=默认(单元+序号)
+    if sort == 'alpha':
+        qs = qs.order_by('word')
+    elif sort == 'alpha_desc':
+        qs = qs.order_by('-word')
 
     total = qs.count()
     start = (page - 1) * per_page
@@ -1692,6 +1699,7 @@ def api_word_bulk_import(request):
 
         imported = 0
         skipped = 0
+        imported_words = []
         unit_number = data.get('unit_number', 99)
         unit, _ = Unit.objects.get_or_create(
             number=unit_number,
@@ -1725,9 +1733,20 @@ def api_word_bulk_import(request):
                 list_number=wd.get('list_number', imported + 1),
             )
             imported += 1
+            imported_words.append(word_text)
 
         unit.word_count = unit.words.count()
         unit.save()
+
+        # 写入导入记录
+        ImportLog.objects.create(
+            source=data.get('source', 'text'),
+            unit_number=unit_number,
+            unit_name=unit.name,
+            imported_count=imported,
+            skipped_count=skipped,
+            words_list=json.dumps(imported_words, ensure_ascii=False),
+        )
 
         return JsonResponse({
             'success': True,
@@ -1736,6 +1755,28 @@ def api_word_bulk_import(request):
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
+
+
+def import_logs(request):
+    """导入记录页面：查看历史导入记录"""
+    logs = ImportLog.objects.all()[:100]
+    total_imported = ImportLog.objects.aggregate(
+        t=Sum('imported_count'))['t'] or 0
+    total_logs = ImportLog.objects.count()
+    return render(request, 'import_logs.html', {
+        'logs': logs,
+        'total_imported': total_imported,
+        'total_logs': total_logs,
+    })
+
+
+@csrf_exempt
+@require_http_methods(['POST', 'DELETE'])
+def api_import_log_delete(request, log_id):
+    """删除一条导入记录（仅删除记录，不影响已导入的单词）"""
+    log = get_object_or_404(ImportLog, id=log_id)
+    log.delete()
+    return JsonResponse({'success': True, 'message': '记录已删除'})
 
 
 @csrf_exempt

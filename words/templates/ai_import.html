@@ -13,7 +13,10 @@
     <h3 style="margin: 0;"><i class="ph ph-sparkle" style="color: var(--c-green);"></i> AI 单词导入</h3>
     <p class="text-sm text-secondary" style="margin: 4px 0 0;">支持 <strong>图片 / 纯文本 / 文件</strong> 三种方式识别单词。识别结果需依次通过 <strong>AI 复审、人工复审、随机抽审</strong> 三道校验，全部通过后才能导入，防止识别错误。</p>
   </div>
-  <a class="btn btn-secondary btn-sm" href="{% url 'words:word_list' %}"><i class="ph ph-arrow-left"></i> 返回词库</a>
+  <div class="flex gap-2">
+    <a class="btn btn-secondary btn-sm" href="{% url 'words:import_logs' %}"><i class="ph ph-clipboard-text"></i> 导入记录</a>
+    <a class="btn btn-secondary btn-sm" href="{% url 'words:word_list' %}"><i class="ph ph-arrow-left"></i> 返回词库</a>
+  </div>
 </div>
 
 <!-- 断点恢复横幅：上次未完成的导入草稿 -->
@@ -1139,6 +1142,7 @@
         unit_number: unitNumber,
         category: category,
         unit_name: unit.name,
+        source: aiSource || 'text',
       });
       if (res.success) {
         appendAILog('导入完成：成功 ' + res.imported + ' 个' + (res.skipped ? '，跳过重复 ' + res.skipped + ' 个' : ''), 'c-green');

@@ -363,3 +363,37 @@ class AIModel(models.Model):
 
     def __str__(self):
         return self.display_name or self.model_id
+
+
+class ImportLog(models.Model):
+    """导入记录：记录每次单词导入的历史，便于回溯查看"""
+    SOURCE_CHOICES = [
+        ('image', '图片识别'),
+        ('text', '纯文本'),
+        ('file', '文件导入'),
+        ('manual', '手动添加'),
+        ('command', '命令行导入'),
+    ]
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='导入时间')
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES,
+        default='text', verbose_name='导入来源')
+    unit_number = models.IntegerField(default=99, verbose_name='目标单元编号')
+    unit_name = models.CharField(max_length=100, blank=True, verbose_name='单元名称')
+    imported_count = models.IntegerField(default=0, verbose_name='成功导入数')
+    skipped_count = models.IntegerField(default=0, verbose_name='跳过重复数')
+    words_list = models.TextField(default='[]', verbose_name='导入的单词列表',
+        help_text='JSON格式: ["word1", "word2"]')
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = '导入记录'
+        verbose_name_plural = '导入记录'
+
+    def __str__(self):
+        return f'{self.created_at:%Y-%m-%d %H:%M} - {self.get_source_display()} - 成功{self.imported_count}'
+
+    def get_words(self):
+        try:
+            return json.loads(self.words_list)
+        except (json.JSONDecodeError, TypeError):
+            return []
