@@ -18,6 +18,7 @@ urlpatterns = [
     path('plan/create/', views.plan_create, name='plan_create'),
     path('settings/', views.settings_page, name='settings_page'),
     path('favorites/', views.favorites_list, name='favorites_list'),
+    path('weak-words/', views.weak_words, name='weak_words'),
     path('focus/', views.focus_mode, name='focus_mode'),
     path('exam/', views.exam, name='exam'),
 

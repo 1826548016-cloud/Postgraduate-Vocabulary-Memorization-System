@@ -14,6 +14,7 @@ import urllib.error
 from django.core.management.base import BaseCommand
 
 from words.models import Word
+from words.ai_prompts import pos_grouping_cli_prompt
 from words.views import resolve_ai_model, resolve_ai_endpoint, build_ai_headers
 
 
@@ -90,17 +91,7 @@ class Command(BaseCommand):
             pos = w.pos or ''
             meanings = '；'.join(w.get_meanings())
             lines.append('%s | %s | %s' % (w.word, pos, meanings))
-        prompt = (
-            '你是英语词典编辑。下面每行是一个单词：单词 | 词性 | 全部释义（用；分隔，未按词性区分）。\n'
-            '请把每个单词的释义按词性重新归类，只输出一个严格的 JSON 对象，不要输出任何其他文字或代码块标记。\n'
-            '格式：{"单词": {"词性缩写": ["释义"], "词性缩写": ["释义"]}, ...}\n'
-            '要求：\n'
-            '- 词性缩写沿用输入中的标准缩写（如 v. n. adj. adv. prep. pron. conj. num. art. aux. 等），顺序与输入词性一致\n'
-            '- 释义保持原文措辞，按语义归入最合适的词性；同一释义在不同词性均有用法时可放入多个词性\n'
-            '- 若某个词性没有对应释义，其值为空数组 []\n'
-            '- 所有单词都要出现在 JSON 中，键名严格等于原单词\n\n'
-            '单词列表：\n' + '\n'.join(lines)
-        )
+        prompt = pos_grouping_cli_prompt(lines)
         payload = {
             'model': cfg['model_id'],
             'temperature': 0.1,

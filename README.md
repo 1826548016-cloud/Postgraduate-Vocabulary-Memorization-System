@@ -1,4 +1,4 @@
-# 智能单词背诵平台（v1.8.1）
+# 智能单词背诵平台（v1.8.2）
 
 # 目前项目已完成多版本迭代，项目正在上线测试中，后续 bug 修复将会继续上传更新，欢迎反馈问题或建议。
 基于 Django 的考研词汇背诵 Web 应用，支持 AI 智能辅助背诵、词库管理、多模式背诵、模拟考试、学习统计，开箱即用（SQLite 本地存储，无需外部数据库，如需使用其他数据库请自行在 settings 里面更改配置）。
@@ -15,6 +15,9 @@
   - 复习将从词库随机抽取
   - **笔记**：背诵时可以记笔记（后续将逐渐完善笔记功能）
   - **AI 速记**：三个模式中一键生成速记（拆分秒背 / 谐音 / 联想口诀），结果缓存到数据库，下次直接查看不再重复调用 AI，也可手动编辑或重新生成
+- **薄弱词**（考前重点突破）
+  - 自动汇总学过但未掌握、历史出错的单词，按错误次数从高到低排序
+  - 顶部展示薄弱词总数、未掌握数、累计错误次数、已复习数，考前集中巩固
 - **小助手（背诵 / 专注）**
   - 背诵时可以调用小助手，向 AI 提问单词考法、辨析、搭配、记忆技巧等（LLM 模型）
 - **每日打卡（自动）**
@@ -51,6 +54,12 @@
 
 ## 快速开始
 默认 Python 环境已安装，如未安装请安装 Python 环境并将其配置到环境变量中。
+首次使用先安装依赖：
+
+```
+pip install -r requirements.txt
+```
+
 为了节省你的时间，请使用你的 AI 编程工具，输入"启动项目"，即可启动项目。
 ## AI 模型配置
 进入 `/settings/` 页面进行操作设置。
@@ -58,18 +67,22 @@
 ```
 d:\word
 ├── manage.py
+├── requirements.txt        # Python 依赖（pip install -r requirements.txt）
 ├── vocab_project/          # Django 项目配置
 │   ├── settings.py
 │   └── urls.py
 ├── words/                  # 主应用
-│   ├── models.py          
+│   ├── models.py
 │   ├── views.py            # 页面视图 + 全部 API
+│   ├── ai_prompts.py       # AI 提示词集中管理
 │   ├── urls.py
 │   ├── templates/          # HTML 模板
+│   │   └── weak_words.html # 薄弱词页面
 │   ├── static/             # CSS / JS / ECharts
 │   └── management/commands/
 │       ├── import_words.py         # JSON 词库导入
 │       ├── import_text.py          # 纯文本导入
+│       ├── generate_examples.py    # AI 批量生成例句
 │       └── optimize_pos_meanings.py # AI 按词性归类释义
 ├── data/hongbaoshu.json    # 内置考研词库数据
 ├── backups/                # 备份文件目录（设置页下载备份生成）

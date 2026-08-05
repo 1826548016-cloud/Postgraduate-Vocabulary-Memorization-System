@@ -19,6 +19,13 @@ from django.views.decorators.http import require_http_methods
 
 from .models import (Unit, Word, StudyProgress, StudyPlan,
                      DailyCheckIn, Favorite, Note, QuickMemory, AIModel, StudySession, UserSettings, ChatMessage, ImportLog)
+from .ai_prompts import (
+    quick_memory_prompt, ASSISTANT_SYSTEM_PROMPT, assistant_word_context,
+    pos_grouping_prompt, examples_prompt,
+    RECOGNIZE_JSON_SCHEMA, RECOGNIZE_COMMON_RULES,
+    recognize_image_prompt, recognize_text_prompt, recognize_file_prompt,
+    ai_review_prompt,
+)
 
 # ─── 帮助函数 ───────────────────────────────────────────────
 
@@ -295,6 +302,50 @@ def settings_page(request):
 def favorites_list(request):
     favs = Favorite.objects.select_related('word__unit').all()
     return render(request, 'favorites.html', {'favorites': favs})
+
+
+def weak_words(request):
+    """薄弱词：学过但未掌握 / 历史出过错（error_count>0）的单词，按薄弱程度排序。"""
+    progress_qs = (
+        StudyProgress.objects
+        .filter(Q(error_count__gt=0) | Q(status__in=['learning', 'reviewing']))
+        .select_related('word__unit')
+        .order_by('-error_count', 'mastery_level', '-review_count')
+    )
+
+    items = []
+    total_errors = 0
+    reviewed = 0
+    for p in progress_qs:
+        w = p.word
+        total_errors += p.error_count
+        if p.review_count > 0:
+            reviewed += 1
+        items.append({
+            'id': w.id,
+            'word': w.word,
+            'phonetic_us': w.phonetic_us,
+            'phonetic_uk': w.phonetic_uk,
+            'pos': w.pos,
+            'meanings': w.get_meanings(),
+            'meanings_by_pos': w.get_meanings_by_pos(),
+            'status': p.status,
+            'status_label': p.get_status_display(),
+            'mastery_level': p.mastery_level,
+            'error_count': p.error_count,
+            'review_count': p.review_count,
+            'unit_number': w.unit.number,
+            'unit_name': w.unit.name,
+            'is_favorite': hasattr(w, 'favorite'),
+        })
+
+    stats = {
+        'total': len(items),
+        'unmastered': sum(1 for it in items if it['status'] != 'mastered'),
+        'total_errors': total_errors,
+        'reviewed': reviewed,
+    }
+    return render(request, 'weak_words.html', {'items': items, 'stats': stats})
 
 
 def focus_mode(request):
@@ -1074,23 +1125,7 @@ def api_quick_memory_generate(request, word_id):
     phonetic_us = word.phonetic_us or ''
     phonetic_uk = word.phonetic_uk or ''
 
-    prompt = (
-        f'你是一名英语词汇记忆专家，擅长用拆分、谐音、联想口诀帮考研学生速记单词。\n'
-        f'请为单词 "{word_text}" 创作一份速记内容，格式严格如下（不要输出任何多余文字）：\n\n'
-        f'{word_text} 速记\n'
-        f'英 /{phonetic_uk}/ 美 /{phonetic_us}/\n'
-        f'{pos} {meanings}\n'
-        f'拆分秒背（最好用）\n'
-        f'拆成N段：seg1 + seg2 + ...\n'
-        f'谐音：中文谐音\n'
-        f'联想口诀：用各部分谐音/含义串成一句生动小故事\n\n'
-        f'要求：\n'
-        f'- 按音节自然拆分（如 environment → en + vi + ron + ment），N 用实际段数替换\n'
-        f'- 谐音要贴近英文发音\n'
-        f'- 口诀把每段的中文谐音或含义串成一句话，控制在 2 句以内\n'
-        f'- 若单词很短（3 个字母以内）可不拆分，直接编口诀\n'
-        f'- 音标若已有则保留，未提供可省略对应行'
-    )
+    prompt = quick_memory_prompt(word_text, pos, meanings, phonetic_us, phonetic_uk)
 
     payload = {
         'model': model,
@@ -1178,28 +1213,11 @@ def api_assistant(request):
         return JsonResponse({'error': str(e)}, status=400)
 
     # 构造上下文：系统提示 + 当前单词信息 + 最近对话历史
-    system_prompt = (
-        '你是「考研单词」学习 App 中的智能助手，支持自由聊天，用户问什么你就答什么。\n'
-        '要求：\n'
-        '- 用中文回答，准确、简洁、有条理\n'
-        '- 不设主题限制：单词学习、日常闲聊、生活建议、编程问题、百科知识、写作等都可以回答\n'
-        '- 如果附带当前单词信息（见下文），优先结合该单词讲解，其余问题正常自由回答\n'
-        '- 结合上下文保持对话连贯；不确定的内容要如实说明，不要编造\n'
-        '- 排版要求：用清晰的 Markdown 格式组织回答——用 ### 小标题分节、**加粗** 关键词、\n'
-        '  用 - 或 1. 列表、用 --- 分隔线、善用表格，让答案层次分明、便于阅读\n'
-    )
+    system_prompt = ASSISTANT_SYSTEM_PROMPT
     messages = [{'role': 'system', 'content': system_prompt}]
 
     if word:
-        word_ctx = (
-            f'当前单词：{word.word}\n'
-            f'音标：英 /{word.phonetic_uk or "-"}/ 美 /{word.phonetic_us or "-"}/\n'
-            f'词性：{word.pos or "-"}\n'
-            f'释义：{"；".join(word.get_meanings()[:5]) or "-"}\n'
-            f'搭配：{"；".join(word.get_collocations()[:5]) or "-"}\n'
-            f'词形变化：{word.get_word_forms() or "-"}\n'
-            f'例句：{word.example_en or ""} {word.example_zh or ""}'
-        )
+        word_ctx = assistant_word_context(word)
         messages.append({'role': 'system', 'content': word_ctx})
 
     # 最近 20 条历史作为对话上下文（记忆互通）
@@ -2117,16 +2135,8 @@ def ai_complete_words(word_objs):
         # 1) 补按词性释义
         for i in range(0, len(need_pos), batch):
             chunk = need_pos[i:i + batch]
-            prompt = (
-                '你是英语词典编辑。下面每行是一个单词：单词 | 词性 | 释义。\n'
-                '请为每个单词按词性重新归类其释义，只输出一个严格的 JSON 对象：'
-                '{"单词": {"v.": ["释义"], "n.": ["释义"], ...}, ...}\n'
-                '要求：\n'
-                '- 词性键使用 v./n./adj./adv./prep./conj./pron./num./art./aux./abbr. 等标准缩写\n'
-                '- 释义归入对应词性下，保留原有中文释义，不要新增义项\n'
-                '- 所有单词都要出现在 JSON 中，键名严格等于原单词\n\n'
-                '单词列表：\n' + '\n'.join(_word_line(w) for w in chunk)
-            )
+            lines = [_word_line(w) for w in chunk]
+            prompt = pos_grouping_prompt(lines)
             try:
                 data = _extract_json_object(_ai_chat_once(cfg, prompt))
             except Exception:
@@ -2140,15 +2150,8 @@ def ai_complete_words(word_objs):
         # 2) 补例句
         for i in range(0, len(need_ex), batch):
             chunk = need_ex[i:i + batch]
-            prompt = (
-                '你是英语词典编辑。下面每行是一个单词：单词 | 词性 | 释义。\n'
-                '请为每个单词生成 1 个简单、地道的英文例句，并给出对应的中文翻译。\n'
-                '只输出一个严格的 JSON 对象，格式：{"单词": {"en": "英文例句", "zh": "中文翻译"}, ...}\n'
-                '要求：\n'
-                '- 例句 8-20 个词，语法正确，适合考研词汇学习场景\n'
-                '- 所有单词都要出现在 JSON 中，键名严格等于原单词\n\n'
-                '单词列表：\n' + '\n'.join(_word_line(w) for w in chunk)
-            )
+            lines = [_word_line(w) for w in chunk]
+            prompt = examples_prompt(lines)
             try:
                 data = _extract_json_object(_ai_chat_once(cfg, prompt))
             except Exception:
@@ -2306,34 +2309,8 @@ def api_ai_recognize(request):
         endpoint = cfg['endpoint']
         model = cfg['model_id']
 
-        json_schema = (
-            '[{"word": "单词拼写", "phonetic_us": "美式音标如/ˈdʒenəreɪt/", '
-            '"phonetic_uk": "英式音标(可选)", "pos": "词性如v./n./adj.", '
-            '"meanings": ["中文释义1", "中文释义2"], '
-            '"example_en": "英文例句(可选)", "example_zh": "中文翻译(可选)"}]\n'
-        )
-        common_rules = (
-            '要求：\n'
-            '1. 完整整理所有出现的单词，不要遗漏任何一个\n'
-            '2. 尽量给出每个单词的美式音标（phonetic_us），用 / 包裹，如 /əˈbændən/；'
-            '若原文已标注音标则直接使用，若无法确定请根据单词拼写推断常见读音\n'
-            '3. 释义使用中文，多个义项放入 meanings 数组\n'
-            '4. 若包含词组/搭配，把短语作为单词输出\n'
-            '5. 只输出 JSON 本身，不要输出任何多余文字、不要用代码块包裹'
-        )
-
         if image_b64:
-            prompt = (
-                '你是一个专业的英语词汇整理助手。请识别图片中的所有英语单词，'
-                '并严格按以下 JSON 数组格式输出：\n' + json_schema +
-                '要求：\n'
-                '1. 完整识别图中所有单词，不要遗漏任何一个\n'
-                '2. 音标若无法准确识别可以留空\n'
-                '3. 释义使用中文，多个义项放入 meanings 数组\n'
-                '4. 按图片中从左到右、从上到下的顺序输出\n'
-                '5. 若图片包含词组/搭配，把短语作为单词输出\n'
-                '6. 只输出 JSON 本身'
-            )
+            prompt = recognize_image_prompt()
             payload = {
                 'model': model,
                 'temperature': 0.1,
@@ -2350,11 +2327,7 @@ def api_ai_recognize(request):
         elif text_content:
             if len(text_content) > 30000:
                 return JsonResponse({'error': '文本过长，请控制在 30000 字符以内'}, status=400)
-            prompt = (
-                '你是一个专业的英语词汇整理助手。请从下面的文本中提取所有英语单词/词组'
-                '（若文本本身是词表，则整理其中每一行），并严格按以下 JSON 数组格式输出：\n' + json_schema +
-                common_rules + '\n\n文本内容如下：\n\n' + text_content
-            )
+            prompt = recognize_text_prompt(text_content)
             payload = {
                 'model': model,
                 'temperature': 0.1,
@@ -2363,11 +2336,7 @@ def api_ai_recognize(request):
         elif file_content:
             if len(file_content) > 60000:
                 return JsonResponse({'error': '文件内容过长，请控制在 60000 字符以内'}, status=400)
-            prompt = (
-                '你是一个专业的英语词汇整理助手。请从文件「%s」的内容中提取所有英语单词/词组'
-                '（若内容本身是词表，则整理其中每一行），并严格按以下 JSON 数组格式输出：\n' % (file_name or '未命名') + json_schema +
-                common_rules + '\n\n文件内容如下：\n\n' + file_content
-            )
+            prompt = recognize_file_prompt(file_name, file_content)
             payload = {
                 'model': model,
                 'temperature': 0.1,
@@ -2424,18 +2393,7 @@ def api_ai_review(request):
             return JsonResponse({'error': '没有可复审的单词'}, status=400)
 
         words_json = json.dumps(words, ensure_ascii=False)
-        prompt = (
-            '你是一个英语词汇质检专家。以下是 AI 从图片/文本中识别出的单词列表，'
-            '请逐条校验拼写、词性、中文释义是否正确合理。\n'
-            '输出要求：\n'
-            '- 严格输出 JSON 数组，数组长度与输入单词数量一致，顺序一致，不要遗漏\n'
-            '- 每项格式：{"word": "原单词", "correct": true/false, '
-            '"issues": ["问题描述1", "问题描述2"], "suggested": "简短修改建议(可选)", '
-            '"fix": {"word": "修正后单词(仅拼写错误时)", "pos": "修正后词性(仅错误时)", "meanings": ["修正后释义1"]}}\n'
-            '- correct 为 true 时 issues 为空数组，fix 可为 null\n'
-            '- 只输出 JSON 本身，不要输出任何多余文字、不要用代码块包裹\n\n'
-            '待复审的单词列表：\n' + words_json
-        )
+        prompt = ai_review_prompt(words_json)
 
         payload = {
             'model': model,

@@ -14,6 +14,7 @@ import urllib.error
 from django.core.management.base import BaseCommand
 
 from words.models import Word
+from words.ai_prompts import examples_cli_prompt
 from words.views import resolve_ai_model, resolve_ai_endpoint, build_ai_headers
 
 
@@ -90,17 +91,7 @@ class Command(BaseCommand):
             meanings = '；'.join(w.get_meanings()) or '；'.join(
                 m for sub in w.get_meanings_by_pos().values() for m in sub)
             lines.append('%s | %s | %s' % (w.word, pos, meanings))
-        prompt = (
-            '你是英语词典编辑。下面每行是一个单词：单词 | 词性 | 释义。\n'
-            '请为每个单词生成 1 个简单、地道的英文例句（尽量体现该词的常见用法），并给出对应的中文翻译。\n'
-            '只输出一个严格的 JSON 对象，不要输出任何其他文字或代码块标记。\n'
-            '格式：{"单词": {"en": "英文例句", "zh": "中文翻译"}, ...}\n'
-            '要求：\n'
-            '- 例句长度 8-20 个词，语法正确，避免生僻词，适合考研词汇学习场景\n'
-            '- 中文翻译自然通顺，符合例句原意\n'
-            '- 所有单词都要出现在 JSON 中，键名严格等于原单词\n\n'
-            '单词列表：\n' + '\n'.join(lines)
-        )
+        prompt = examples_cli_prompt(lines)
         payload = {
             'model': cfg['model_id'],
             'temperature': 0.5,
