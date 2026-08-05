@@ -694,3 +694,58 @@ textarea.form-input { resize: vertical; min-height: 80px; }
   padding: 8px 10px; font-size: var(--fs-sm); color: var(--c-text);
   pointer-events: none; display: none;
 }
+
+/* ===== 词性标签编辑器 ===== */
+.pos-tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.pos-quick-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pos-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 999px;
+  font-size: var(--fs-sm); font-weight: 600; line-height: 1.5;
+  background: var(--c-surface-2); border: 1px solid var(--c-border);
+  color: var(--c-text);
+}
+.pos-tag-name { cursor: text; }
+.pos-tag-count { font-weight: 400; opacity: .7; font-size: var(--fs-xs); }
+.pos-tag-x {
+  border: none; background: transparent; cursor: pointer;
+  font-size: var(--fs-sm); line-height: 1; padding: 0 2px; opacity: .6;
+}
+.pos-tag-x:hover { opacity: 1; }
+.pos-tag-blue  { background: #e8f1fe; color: #2563eb; border-color: #cfe0fd; }
+.pos-tag-green { background: #e7f7ee; color: #16a34a; border-color: #c9efd8; }
+.pos-tag-orange{ background: #fef3e2; color: #d97706; border-color: #fde2b8; }
+.pos-tag-purple{ background: #f3e8fe; color: #9333ea; border-color: #e6d3fb; }
+.pos-tag-cyan  { background: #e0f7fa; color: #0891b2; border-color: #c0edf3; }
+.pos-tag-teal  { background: #e6faf1; color: #0d9488; border-color: #c8f0e5; }
+.pos-tag-red   { background: #fdeaea; color: #dc2626; border-color: #f8cfcf; }
+.pos-tag-gray  { background: #f1f5f9; color: #64748b; border-color: #e2e8f0; }
+.pos-tag-default{ background: var(--c-surface-2); color: var(--c-text-2); }
+.pos-tag-uc    { background: #f1f5f9; color: #64748b; border-style: dashed; }
+
+.pos-section {
+  border: 1px solid var(--c-border); border-radius: var(--radius-sm);
+  padding: 10px; margin-bottom: 10px; background: var(--c-surface-2);
+}
+.pos-section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.pos-section-count { margin-left: auto; font-size: var(--fs-xs); color: var(--c-text-3); }
+.pos-meanings { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.meaning-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: var(--radius-sm);
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  font-size: var(--fs-sm); cursor: pointer;
+}
+.meaning-chip:hover { border-color: var(--accent); }
+.meaning-chip-x {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--c-text-3); font-size: var(--fs-sm); padding: 0 2px;
+}
+.meaning-chip-x:hover { color: var(--c-red); }
+.pos-meaning-input { margin-top: 4px; }
+
+/* ===== 背诵页：逐词性分步显示 ===== */
+.pos-group { margin-bottom: 8px; padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--c-surface-2); border-radius: var(--radius-sm); }
+.pos-group .meaning-pos { margin-right: 6px; }
+.pos-group .meaning-item { display: inline-block; margin: 2px 6px 2px 0; }
+.pos-group + .pos-group { margin-top: 8px; }

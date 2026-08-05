@@ -85,7 +85,7 @@
   var savedIndex = sessionStorage.getItem('vocab-learn-idx');
   var currentIndex = (savedIndex !== null) ? parseInt(savedIndex) : 0;
   var currentWord = null;
-  var revealed = false;
+  var revealDone = false; // 是否已显示释义
 
   var counts = { mastered: 0, unknown: 0 };
   // Restore counts so refresh keeps 会/不会统计
@@ -161,12 +161,12 @@
     if (window.WordExtPanel) WordExtPanel.closeExtPanel();
 
     currentWord = wordsData[currentIndex];
-    revealed = false;
+    revealDone = false;
 
     els.wordText.textContent = currentWord.word || '';
     els.wordPhonetic.textContent = currentWord.phonetic_us || '';
     els.wordPos.textContent = currentWord.pos || '';
-    els.wordMeaning.innerHTML = formatMeanings(currentWord);
+    els.wordMeaning.innerHTML = '';
     els.wordMeaning.classList.add('hidden');
     els.wordExample.textContent = (currentWord.example_en || '') + '\n' + (currentWord.example_zh || '');
     els.wordExample.classList.add('hidden');
@@ -178,9 +178,29 @@
     doSpeak(currentWord.word || '');
   }
 
+  function getPosGroups(word) {
+    var byPos = (word && word.meanings_by_pos) || {};
+    return Object.keys(byPos)
+      .filter(function (k) { return byPos[k] && byPos[k].length; })
+      .map(function (k) { return { pos: k, meanings: byPos[k] }; });
+  }
+
+  // 按一次空格：一次性显示所有词性的释义 + 例句
   function reveal() {
-    if (revealed || !currentWord) return;
-    revealed = true;
+    if (revealDone || !currentWord) return;
+    revealDone = true;
+    var groups = getPosGroups(currentWord);
+    if (groups.length === 0) {
+      // 无按词性分组：回退旧模式
+      els.wordMeaning.innerHTML = formatMeanings(currentWord);
+    } else {
+      els.wordMeaning.innerHTML = groups.map(function (g) {
+        return '<div class="pos-group">' +
+          '<span class="meaning-pos">' + escapeHtml(g.pos) + '</span> ' +
+          g.meanings.map(function (m) { return '<span class="meaning-item">' + escapeHtml(m) + '</span>'; }).join(' ') +
+        '</div>';
+      }).join('');
+    }
     els.wordMeaning.classList.remove('hidden');
     els.wordExample.classList.remove('hidden');
     els.revealBtn.textContent = '已显示';

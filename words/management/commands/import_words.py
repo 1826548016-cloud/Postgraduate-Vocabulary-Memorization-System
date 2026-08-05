@@ -4,8 +4,23 @@
 """
 import json
 import sys
+import re
 from django.core.management.base import BaseCommand, CommandError
+from django.db.models import Max
 from words.models import Unit, Word
+from words.views import normalize_word_data
+
+
+def clean_unit_name(name, number):
+    """清理单元名称：去除 'Unit1---3' 这类合并命名中的连字符堆叠"""
+    if not name:
+        return f'Unit{number}'
+    name = name.strip()
+    # 形如 Unit1---3 / Unit8--9 / List 1-3 的合并命名，规范为起始编号
+    m = re.match(r'^(Unit|List)\s*\d+\s*[-—–]+', name, re.IGNORECASE)
+    if m:
+        return f'Unit{number}'
+    return name
 
 
 class Command(BaseCommand):
@@ -42,7 +57,7 @@ class Command(BaseCommand):
 
         for unit_data in units_data:
             unit_number = unit_data.get('number', 0)
-            unit_name = unit_data.get('name', f'List {unit_number}')
+            unit_name = clean_unit_name(unit_data.get('name', ''), unit_number)
             unit_category = unit_data.get('category', 'required')
 
             # 创建或更新单元
@@ -57,41 +72,39 @@ class Command(BaseCommand):
             if created:
                 total_units += 1
 
+            next_list_number = (unit.words.aggregate(m=Max('list_number'))['m'] or 0) + 1
+
             # 导入单词
             words_list = unit_data.get('words', [])
             for word_data in words_list:
-                word_text = word_data.get('word', '').strip()
-                if not word_text:
+                nd = normalize_word_data(word_data)
+                if not nd:
                     skipped += 1
                     continue
 
-                existing = Word.objects.filter(word__iexact=word_text).first()
+                existing = Word.objects.filter(word__iexact=nd['word']).first()
                 if existing:
-                    self.stdout.write(self.style.WARNING(f'跳过重复单词: {word_text}'))
+                    self.stdout.write(self.style.WARNING(f'跳过重复单词: {nd["word"]}'))
                     skipped += 1
                     continue
-
-                # 将 JSON 字段序列化为字符串
-                meanings = word_data.get('meanings', [])
-                uncommon_meanings = word_data.get('uncommon_meanings', [])
-                collocations = word_data.get('collocations', [])
-                word_forms = word_data.get('word_forms', {})
 
                 Word.objects.create(
-                    word=word_text,
-                    phonetic_us=word_data.get('phonetic_us', ''),
-                    phonetic_uk=word_data.get('phonetic_uk', ''),
-                    pos=word_data.get('pos', ''),
-                    meanings=json.dumps(meanings, ensure_ascii=False),
-                    uncommon_meanings=json.dumps(uncommon_meanings, ensure_ascii=False),
-                    collocations=json.dumps(collocations, ensure_ascii=False),
-                    word_forms=json.dumps(word_forms, ensure_ascii=False),
-                    example_en=word_data.get('example_en', ''),
-                    example_zh=word_data.get('example_zh', ''),
+                    word=nd['word'],
+                    phonetic_us=nd['phonetic_us'],
+                    phonetic_uk=nd['phonetic_uk'],
+                    pos=nd['pos'],
+                    meanings=json.dumps(nd['meanings'], ensure_ascii=False),
+                    meanings_by_pos=json.dumps(nd['meanings_by_pos'], ensure_ascii=False),
+                    uncommon_meanings=json.dumps(nd['uncommon_meanings'], ensure_ascii=False),
+                    collocations=json.dumps(nd['collocations'], ensure_ascii=False),
+                    word_forms=json.dumps(nd['word_forms'], ensure_ascii=False),
+                    example_en=nd['example_en'],
+                    example_zh=nd['example_zh'],
                     category=word_data.get('category', unit_category),
                     unit=unit,
-                    list_number=word_data.get('list_number', total_words + 1),
+                    list_number=next_list_number,
                 )
+                next_list_number += 1
                 total_words += 1
 
             # 更新单元词数

@@ -164,7 +164,7 @@
   var currentIndex = (savedIndex !== null) ? parseInt(savedIndex) : 0;
   if (currentIndex >= reviewCount) currentIndex = 0;
   var currentWord = null;
-  var revealed = false;
+  var revealDone = false; // 是否已显示释义
 
   var counts = { mastered: 0, unknown: 0 };
   // Restore counts so refresh keeps 会/不会统计
@@ -229,7 +229,7 @@
 
   function renderWord(word) {
     currentWord = word;
-    revealed = false;
+    revealDone = false;
     sessionStorage.setItem('vocab-review-idx', currentIndex);
 
     // 切换单词时收起笔记/速记展开区
@@ -241,7 +241,7 @@
     els.wordText.textContent = word.word || '';
     els.wordPhonetic.textContent = word.phonetic_us || '';
     els.wordPos.textContent = word.pos || '';
-    els.wordMeaning.innerHTML = formatMeanings(word);
+    els.wordMeaning.innerHTML = '';
     els.wordExample.textContent = (word.example_en || '') + '\n' + (word.example_zh || '');
 
     els.levelBadge.textContent = '当前状态：' + (status === 'mastered' ? '已掌握' : '学习中');
@@ -257,9 +257,29 @@
     speakWord(word.word || '');
   }
 
+  function getPosGroups(word) {
+    var byPos = (word && word.meanings_by_pos) || {};
+    return Object.keys(byPos)
+      .filter(function (k) { return byPos[k] && byPos[k].length; })
+      .map(function (k) { return { pos: k, meanings: byPos[k] }; });
+  }
+
+  // 按一次空格：一次性显示所有词性的释义 + 例句
   function reveal() {
-    if (revealed) return;
-    revealed = true;
+    if (revealDone || !currentWord) return;
+    revealDone = true;
+    var groups = getPosGroups(currentWord);
+    if (groups.length === 0) {
+      // 无按词性分组：回退旧模式
+      els.wordMeaning.innerHTML = formatMeanings(currentWord);
+    } else {
+      els.wordMeaning.innerHTML = groups.map(function (g) {
+        return '<div class="pos-group">' +
+          '<span class="meaning-pos">' + escapeHtml(g.pos) + '</span> ' +
+          g.meanings.map(function (m) { return '<span class="meaning-item">' + escapeHtml(m) + '</span>'; }).join(' ') +
+        '</div>';
+      }).join('');
+    }
     els.wordMeaning.classList.remove('hidden');
     els.wordExample.classList.remove('hidden');
     els.revealBtn.textContent = '已显示';

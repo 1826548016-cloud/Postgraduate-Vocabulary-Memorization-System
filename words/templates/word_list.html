@@ -175,7 +175,7 @@
 
 <!-- ===== Word Add/Edit Modal ===== -->
 <div id="wordModal" class="modal-overlay hidden" onclick="if (event.target === this) closeWordModal()">
-  <div class="modal" style="max-width: 560px;">
+  <div class="modal" style="max-width: 660px;">
     <div class="flex justify-between items-center" style="margin-bottom: 16px;">
       <h3 id="wordModalTitle" style="margin: 0; font-size: var(--fs-lg);">添加单词</h3>
       <button class="btn btn-ghost" onclick="closeWordModal()" title="关闭"><i class="ph ph-x"></i></button>
@@ -199,24 +199,27 @@
       </div>
     </div>
 
-    <div class="grid grid-2">
-      <div class="form-group">
-        <label class="form-label">词性</label>
-        <input type="text" id="wmPos" class="form-input" placeholder="如: v. / n. / adj.">
-      </div>
-      <div class="form-group">
-        <label class="form-label">词汇类别</label>
-        <select id="wmCategory" class="form-input">
-          <option value="required">必考词</option>
-          <option value="basic">基础词</option>
-          <option value="advanced">超纲词</option>
-        </select>
+    <div class="form-group">
+      <label class="form-label">词汇类别</label>
+      <select id="wmCategory" class="form-input">
+        <option value="required">必考词</option>
+        <option value="basic">基础词</option>
+        <option value="advanced">超纲词</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">词性标签（点击常用标签添加 · 双击标签重命名 · × 删除整个词性）</label>
+      <div id="wmPosTags" class="pos-tag-list"></div>
+      <div class="pos-quick-row">
+        <span class="text-secondary text-sm" style="white-space: nowrap;">常用：</span>
+        <span id="wmPosQuick"></span>
       </div>
     </div>
 
     <div class="form-group">
-      <label class="form-label">释义（每行一条）<span class="text-red">*</span></label>
-      <textarea id="wmMeanings" class="form-input" placeholder="v. 产生，生成&#10;n. 产生；生成" rows="3"></textarea>
+      <label class="form-label">释义（按词性填写，输入后按 空格 / 分号 / 回车 添加，点击释义可编辑）<span class="text-red">*</span></label>
+      <div id="wmPosSections"></div>
     </div>
 
     <div class="form-group">
@@ -580,9 +583,8 @@
     document.getElementById('wmWord').value = d.word || '';
     document.getElementById('wmPhoneticUs').value = d.phonetic_us || '';
     document.getElementById('wmPhoneticUk').value = d.phonetic_uk || '';
-    document.getElementById('wmPos').value = d.pos || '';
     document.getElementById('wmCategory').value = d.category || 'required';
-    document.getElementById('wmMeanings').value = (d.meanings || []).join('\n');
+    loadPosData(d);
     document.getElementById('wmUncommon').value = (d.uncommon_meanings || []).join('\n');
     document.getElementById('wmCollocations').value = (d.collocations || []).join('\n');
     document.getElementById('wmExampleEn').value = d.example_en || '';
@@ -623,17 +625,250 @@
     return { number: parseInt(sel.value) || null, name: '' };
   }
 
+  // ===== 词性标签编辑器（增删改查） =====
+  var UNCLASSIFIED_POS = '未分类';
+  var POS_NAMES = {
+    'v.': '动词', 'vi.': '不及物动词', 'vt.': '及物动词',
+    'n.': '名词', 'adj.': '形容词', 'adv.': '副词',
+    'prep.': '介词', 'pron.': '代词', 'conj.': '连词',
+    'num.': '数词', 'art.': '冠词', 'aux.': '助动词',
+    'interj.': '感叹词', 'int.': '感叹词', 'abbr.': '缩写',
+    'phr.': '短语', 'modal.': '情态动词', 'det.': '限定词', 'pro.': '代词'
+  };
+  var POS_COLORS = {
+    'v.': 'blue', 'vi.': 'blue', 'vt.': 'blue', 'modal.': 'blue', 'aux.': 'blue',
+    'n.': 'green', 'pro.': 'green', 'pron.': 'green',
+    'adj.': 'orange', 'adv.': 'purple',
+    'prep.': 'cyan', 'conj.': 'cyan',
+    'num.': 'teal', 'phr.': 'teal',
+    'art.': 'gray', 'det.': 'gray', 'abbr.': 'gray',
+    'interj.': 'red', 'int.': 'red'
+  };
+  var POS_QUICK = ['v.', 'n.', 'adj.', 'adv.', 'prep.', 'pron.', 'conj.', 'num.', 'art.', 'aux.', 'interj.'];
+  var wmPosData = {}; // {"v.": ["产生", "生成"]}
+
+  function safeJs(s) {
+    return String(s == null ? '' : s).replace(/'/g, "\\'");
+  }
+
+  function posColorClass(k) {
+    if (k === UNCLASSIFIED_POS) return 'pos-tag-uc';
+    return 'pos-tag-' + (POS_COLORS[k] || 'default');
+  }
+
+  // 从 API 数据加载词性标签与释义（旧数据自动识别词性前缀）
+  function loadPosData(d) {
+    wmPosData = {};
+    var byPos = d.meanings_by_pos || {};
+    var hasGroups = Object.keys(byPos).some(function (k) { return (byPos[k] || []).length > 0; });
+    if (hasGroups) {
+      Object.keys(byPos).forEach(function (k) {
+        wmPosData[k] = (byPos[k] || []).slice();
+      });
+    } else {
+      (d.meanings || []).forEach(function (m) {
+        var s = String(m).trim();
+        if (!s) return;
+        var mo = /^([a-zA-Z]+\.)\s*(.+)$/.exec(s);
+        if (mo && POS_NAMES[mo[1].toLowerCase()]) {
+          var key = mo[1].toLowerCase();
+          (wmPosData[key] = wmPosData[key] || []).push(mo[2]);
+        } else {
+          (wmPosData[UNCLASSIFIED_POS] = wmPosData[UNCLASSIFIED_POS] || []).push(s);
+        }
+      });
+      if (!Object.keys(wmPosData).length && (d.meanings || []).length) {
+        wmPosData[UNCLASSIFIED_POS] = (d.meanings || []).slice();
+      }
+    }
+    renderPosEditor();
+  }
+
+  // 收集当前编辑结果（剔除空词性）
+  function collectPosData() {
+    var out = {};
+    Object.keys(wmPosData).forEach(function (k) {
+      var ms = (wmPosData[k] || []).map(function (m) { return String(m).trim(); }).filter(Boolean);
+      if (ms.length) out[k] = ms;
+    });
+    return out;
+  }
+
+  function renderPosEditor() {
+    var tagsEl = document.getElementById('wmPosTags');
+    var quickEl = document.getElementById('wmPosQuick');
+    var secEl = document.getElementById('wmPosSections');
+    var keys = Object.keys(wmPosData);
+
+    // 已选标签栏
+    tagsEl.innerHTML = keys.map(function (k) {
+      var n = (wmPosData[k] || []).length;
+      return '<span class="pos-tag ' + posColorClass(k) + '">' +
+        '<span class="pos-tag-name" title="双击重命名" ondblclick="renamePos(\'' + safeJs(k) + '\')">' + escapeHtml(k) + '</span>' +
+        '<span class="pos-tag-count">' + n + '</span>' +
+        '<button type="button" class="pos-tag-x" onclick="removePos(\'' + safeJs(k) + '\')" title="删除该词性及所有释义">×</button>' +
+      '</span>';
+    }).join('') || '<span class="text-secondary text-sm">暂无词性，点击下方常用标签添加</span>';
+
+    // 常用词性快捷按钮
+    quickEl.innerHTML = POS_QUICK.map(function (k) {
+      var active = Object.prototype.hasOwnProperty.call(wmPosData, k);
+      return '<button type="button" class="btn btn-sm ' + (active ? 'btn-primary' : 'btn-secondary') + '" onclick="toggleQuickPos(\'' + k + '\')">' + k + '</button>';
+    }).join('') + '<button type="button" class="btn btn-sm btn-secondary" onclick="addCustomPos()" title="添加自定义词性（如 vt.、phr.）">+ 自定义</button>';
+
+    // 按词性释义分区
+    secEl.innerHTML = keys.map(function (k) {
+      var ms = wmPosData[k] || [];
+      return '<div class="pos-section">' +
+        '<div class="pos-section-head">' +
+          '<span class="pos-tag ' + posColorClass(k) + '">' + escapeHtml(k) + '</span>' +
+          '<span class="text-secondary text-sm">' + escapeHtml(POS_NAMES[k] || '自定义') + '</span>' +
+          '<span class="pos-section-count">' + ms.length + ' 条释义</span>' +
+          '<button type="button" class="btn btn-sm btn-secondary" onclick="renamePos(\'' + safeJs(k) + '\')" title="重命名词性">✎</button>' +
+          '<button type="button" class="btn btn-sm btn-danger" onclick="removePos(\'' + safeJs(k) + '\')" title="删除该词性及所有释义">×</button>' +
+        '</div>' +
+        '<div class="pos-meanings">' +
+          (ms.length ? ms.map(function (m, i) {
+            return '<span class="meaning-chip">' +
+              '<span class="meaning-chip-text" title="点击编辑释义" onclick="editMeaning(this, ' + i + ', \'' + safeJs(k) + '\')">' + escapeHtml(m) + '</span>' +
+              '<button type="button" class="meaning-chip-x" onclick="removeMeaning(\'' + safeJs(k) + '\', ' + i + ')" title="删除该释义">×</button>' +
+            '</span>';
+          }).join('') : '<span class="text-secondary text-sm">暂无释义，在下方输入后按空格添加</span>') +
+        '</div>' +
+        '<input type="text" class="form-input pos-meaning-input" data-pos="' + escapeHtml(k) + '" placeholder="输入释义后按 空格 / 分号 / 回车 添加">' +
+      '</div>';
+    }).join('') || '<div class="text-secondary text-sm">请先在上方添加词性标签，或从常用标签中选择</div>';
+
+    // 绑定各分区输入框（IME 输入中不触发提交）
+    secEl.querySelectorAll('.pos-meaning-input').forEach(function (inp) {
+      inp.addEventListener('keydown', function (e) {
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar' || e.key === ';' || e.key === '；') {
+          e.preventDefault();
+          commitMeaningInput(inp);
+        }
+      });
+      inp.addEventListener('blur', function () { commitMeaningInput(inp); });
+    });
+  }
+
+  // 输入框内容 → 拆分为释义 chip（空格 / 分号 / 回车分隔，去重）
+  function commitMeaningInput(inp) {
+    var k = inp.getAttribute('data-pos');
+    var val = String(inp.value || '').trim();
+    if (!val) return;
+    var parts = val.split(/[;；\n]| +/).map(function (s) { return s.trim(); }).filter(Boolean);
+    if (!parts.length) return;
+    wmPosData[k] = wmPosData[k] || [];
+    parts.forEach(function (p) { if (wmPosData[k].indexOf(p) === -1) wmPosData[k].push(p); });
+    inp.value = '';
+    renderPosEditor();
+  }
+
+  // 添加 / 移除常用词性
+  function toggleQuickPos(k) {
+    if (Object.prototype.hasOwnProperty.call(wmPosData, k)) {
+      if (confirm('确定删除词性 "' + k + '" 及其所有释义吗？')) {
+        delete wmPosData[k];
+        renderPosEditor();
+      }
+    } else {
+      wmPosData[k] = wmPosData[k] || [];
+      renderPosEditor();
+    }
+  }
+
+  // 增：自定义词性
+  function addCustomPos() {
+    var tag = prompt('输入自定义词性标签（如 vt.、phr.、modal.）');
+    if (!tag) return;
+    tag = tag.trim().replace(/[^a-zA-Z.]+/g, '');
+    if (!tag) return;
+    if (tag.slice(-1) !== '.') tag += '.';
+    if (wmPosData[tag]) { showToast('词性 "' + tag + '" 已存在', 'error'); return; }
+    wmPosData[tag] = [];
+    renderPosEditor();
+  }
+
+  // 删：删除整个词性及其释义
+  function removePos(k) {
+    if (!confirm('确定删除词性 "' + k + '" 及其所有释义吗？')) return;
+    delete wmPosData[k];
+    renderPosEditor();
+  }
+
+  // 改：重命名词性（保留其下释义）
+  function renamePos(k) {
+    var newTag = prompt('重命名词性（当前：' + k + '）', k);
+    if (!newTag) return;
+    newTag = newTag.trim().replace(/[^a-zA-Z.]+/g, '');
+    if (!newTag || newTag === k) return;
+    if (newTag.slice(-1) !== '.') newTag += '.';
+    if (wmPosData[newTag]) { showToast('词性 "' + newTag + '" 已存在', 'error'); return; }
+    wmPosData[newTag] = wmPosData[k];
+    delete wmPosData[k];
+    renderPosEditor();
+  }
+
+  // 删：删除单个释义
+  function removeMeaning(k, i) {
+    if (!wmPosData[k]) return;
+    wmPosData[k].splice(i, 1);
+    renderPosEditor();
+  }
+
+  // 改：点击释义 chip → 行内编辑
+  function editMeaning(spanEl, i, k) {
+    var wrap = spanEl.parentNode;
+    var oldVal = (wmPosData[k] || [])[i] || '';
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'form-input';
+    inp.style.maxWidth = '220px';
+    inp.value = oldVal;
+    var finished = false;
+    var done = function (save) {
+      if (finished) return;
+      finished = true;
+      if (save) {
+        var v = String(inp.value || '').trim();
+        if (v) wmPosData[k][i] = v;
+        else wmPosData[k].splice(i, 1);
+      }
+      renderPosEditor();
+    };
+    inp.addEventListener('keydown', function (e) {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Enter') { e.preventDefault(); done(true); }
+      if (e.key === 'Escape') { e.preventDefault(); done(false); }
+    });
+    inp.addEventListener('blur', function () { done(true); });
+    wrap.replaceWith(inp);
+    inp.focus();
+    inp.select();
+  }
+
   async function submitWordModal() {
     var id = document.getElementById('wmId').value;
     var word = document.getElementById('wmWord').value.trim();
     if (!word) { showToast('请输入单词', 'error'); return; }
 
+    // 收集词性标签 → 释义（三字段同步提交）
+    var meaningsByPos = collectPosData();
+    var meaningsFlat = [];
+    var posStr = '';
+    Object.keys(meaningsByPos).forEach(function (k) {
+      meaningsFlat = meaningsFlat.concat(meaningsByPos[k]);
+      if (k !== UNCLASSIFIED_POS) posStr = posStr ? posStr + '/' + k : k;
+    });
+
     var data = {
       word: word,
       phonetic_us: document.getElementById('wmPhoneticUs').value.trim(),
       phonetic_uk: document.getElementById('wmPhoneticUk').value.trim(),
-      pos: document.getElementById('wmPos').value.trim(),
-      meanings: splitLines(document.getElementById('wmMeanings').value),
+      pos: posStr,
+      meanings: meaningsFlat,
+      meanings_by_pos: meaningsByPos,
       uncommon_meanings: splitLines(document.getElementById('wmUncommon').value),
       collocations: splitLines(document.getElementById('wmCollocations').value),
       example_en: document.getElementById('wmExampleEn').value.trim(),
@@ -644,7 +879,7 @@
       list_number: parseInt(document.getElementById('wmListNumber').value) || 1,
     };
 
-    if (!data.meanings.length) { showToast('请输入至少一条释义', 'error'); return; }
+    if (!meaningsFlat.length) { showToast('请输入至少一条释义', 'error'); return; }
 
     try {
       var url = id ? '/api/word/update/' + id + '/' : '/api/word/create/';

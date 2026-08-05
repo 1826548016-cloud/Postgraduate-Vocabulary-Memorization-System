@@ -3,13 +3,14 @@ import os
 import random
 import re
 import shutil
+import time
 import urllib.request
 import urllib.error
 from datetime import date, timedelta, datetime
 from io import BytesIO
 
 from django.conf import settings
-from django.db.models import Q, Count, Sum, Avg, F
+from django.db.models import Q, Count, Sum, Avg, F, Max
 from django.http import JsonResponse, HttpResponse, FileResponse
 from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
@@ -1178,11 +1179,12 @@ def api_assistant(request):
 
     # 构造上下文：系统提示 + 当前单词信息 + 最近对话历史
     system_prompt = (
-        '你是「考研单词」学习 App 中的英语学习小助手，用户在背单词时向你提问。\n'
+        '你是「考研单词」学习 App 中的智能助手，支持自由聊天，用户问什么你就答什么。\n'
         '要求：\n'
         '- 用中文回答，准确、简洁、有条理\n'
-        '- 可讲解单词考法：词义辨析、固定搭配、词形变化、真题/考试常见考法、记忆技巧等\n'
-        '- 结合上下文保持对话连贯；不确定的内容要如实说明\n'
+        '- 不设主题限制：单词学习、日常闲聊、生活建议、编程问题、百科知识、写作等都可以回答\n'
+        '- 如果附带当前单词信息（见下文），优先结合该单词讲解，其余问题正常自由回答\n'
+        '- 结合上下文保持对话连贯；不确定的内容要如实说明，不要编造\n'
         '- 排版要求：用清晰的 Markdown 格式组织回答——用 ### 小标题分节、**加粗** 关键词、\n'
         '  用 - 或 1. 列表、用 --- 分隔线、善用表格，让答案层次分明、便于阅读\n'
     )
@@ -1640,20 +1642,20 @@ def api_unit_update(request, unit_number):
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_word_create(request):
-    """手动添加或 AI 导入单词"""
+    """手动添加或 AI 导入单词（统一走规范化层）"""
     try:
         data = json.loads(request.body)
-        word_text = data.get('word', '').strip()
-        if not word_text:
+        nd = normalize_word_data(data)
+        if not nd:
             return JsonResponse({'error': '单词不能为空'}, status=400)
 
         # 如果单词已存在，返回已存在信息
-        existing = Word.objects.filter(word__iexact=word_text).first()
+        existing = Word.objects.filter(word__iexact=nd['word']).first()
         if existing:
             return JsonResponse({'error': '单词已存在', 'word_id': existing.id}, status=409)
 
         # 自动获取或创建单元
-        unit_number = data.get('unit_number', 99)
+        unit_number = int(data.get('unit_number', 99) or 99)
         unit, _ = Unit.objects.get_or_create(
             number=unit_number,
             defaults={
@@ -1663,24 +1665,31 @@ def api_word_create(request):
         )
 
         word = Word.objects.create(
-            word=word_text,
-            phonetic_us=data.get('phonetic_us', ''),
-            phonetic_uk=data.get('phonetic_uk', ''),
-            pos=data.get('pos', ''),
-            meanings=json.dumps(data.get('meanings', []), ensure_ascii=False),
-            uncommon_meanings=json.dumps(data.get('uncommon_meanings', []), ensure_ascii=False),
-            collocations=json.dumps(data.get('collocations', []), ensure_ascii=False),
-            word_forms=json.dumps(data.get('word_forms', {}), ensure_ascii=False),
-            example_en=data.get('example_en', ''),
-            example_zh=data.get('example_zh', ''),
+            word=nd['word'],
+            phonetic_us=nd['phonetic_us'],
+            phonetic_uk=nd['phonetic_uk'],
+            pos=nd['pos'],
+            meanings=json.dumps(nd['meanings'], ensure_ascii=False),
+            meanings_by_pos=json.dumps(nd['meanings_by_pos'], ensure_ascii=False),
+            uncommon_meanings=json.dumps(nd['uncommon_meanings'], ensure_ascii=False),
+            collocations=json.dumps(nd['collocations'], ensure_ascii=False),
+            word_forms=json.dumps(nd['word_forms'], ensure_ascii=False),
+            example_en=nd['example_en'],
+            example_zh=nd['example_zh'],
             category=data.get('category', 'required'),
             unit=unit,
-            list_number=data.get('list_number', 1),
+            list_number=unit.words.count() + 1,
         )
 
         # 更新单元词数
         unit.word_count = unit.words.count()
         unit.save()
+
+        # 导入后自动 AI 补全（按词性释义 + 例句），失败不影响导入结果
+        try:
+            ai_complete_words([word])
+        except Exception:
+            pass
 
         return JsonResponse({'success': True, 'word_id': word.id})
     except Exception as e:
@@ -1690,7 +1699,7 @@ def api_word_create(request):
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_word_bulk_import(request):
-    """批量导入单词 - AI识别结果批量导入"""
+    """批量导入单词 - AI识别结果批量导入（统一走规范化层）"""
     try:
         data = json.loads(request.body)
         words_data = data.get('words', [])
@@ -1700,7 +1709,8 @@ def api_word_bulk_import(request):
         imported = 0
         skipped = 0
         imported_words = []
-        unit_number = data.get('unit_number', 99)
+        new_word_objs = []
+        unit_number = int(data.get('unit_number', 99) or 99)
         unit, _ = Unit.objects.get_or_create(
             number=unit_number,
             defaults={
@@ -1709,31 +1719,36 @@ def api_word_bulk_import(request):
             }
         )
 
+        next_list_number = (unit.words.aggregate(m=Max('list_number'))['m'] or 0) + 1
+
         for wd in words_data:
-            word_text = wd.get('word', '').strip()
-            if not word_text:
+            nd = normalize_word_data(wd)
+            if not nd:
                 continue
-            if Word.objects.filter(word__iexact=word_text).exists():
+            if Word.objects.filter(word__iexact=nd['word']).exists():
                 skipped += 1
                 continue
 
-            Word.objects.create(
-                word=word_text,
-                phonetic_us=wd.get('phonetic_us', ''),
-                phonetic_uk=wd.get('phonetic_uk', ''),
-                pos=wd.get('pos', ''),
-                meanings=json.dumps(wd.get('meanings', []), ensure_ascii=False),
-                uncommon_meanings=json.dumps(wd.get('uncommon_meanings', []), ensure_ascii=False),
-                collocations=json.dumps(wd.get('collocations', []), ensure_ascii=False),
-                word_forms=json.dumps(wd.get('word_forms', {}), ensure_ascii=False),
-                example_en=wd.get('example_en', ''),
-                example_zh=wd.get('example_zh', ''),
-                category=wd.get('category', 'required'),
+            word = Word.objects.create(
+                word=nd['word'],
+                phonetic_us=nd['phonetic_us'],
+                phonetic_uk=nd['phonetic_uk'],
+                pos=nd['pos'],
+                meanings=json.dumps(nd['meanings'], ensure_ascii=False),
+                meanings_by_pos=json.dumps(nd['meanings_by_pos'], ensure_ascii=False),
+                uncommon_meanings=json.dumps(nd['uncommon_meanings'], ensure_ascii=False),
+                collocations=json.dumps(nd['collocations'], ensure_ascii=False),
+                word_forms=json.dumps(nd['word_forms'], ensure_ascii=False),
+                example_en=nd['example_en'],
+                example_zh=nd['example_zh'],
+                category=nd.get('category') or data.get('category', 'required'),
                 unit=unit,
-                list_number=wd.get('list_number', imported + 1),
+                list_number=next_list_number,
             )
+            next_list_number += 1
             imported += 1
-            imported_words.append(word_text)
+            imported_words.append(nd['word'])
+            new_word_objs.append(word)
 
         unit.word_count = unit.words.count()
         unit.save()
@@ -1747,6 +1762,12 @@ def api_word_bulk_import(request):
             skipped_count=skipped,
             words_list=json.dumps(imported_words, ensure_ascii=False),
         )
+
+        # 导入后自动 AI 补全（按词性释义 + 例句），失败不影响导入结果
+        try:
+            ai_complete_words(new_word_objs)
+        except Exception:
+            pass
 
         return JsonResponse({
             'success': True,
@@ -1794,10 +1815,29 @@ def api_word_update(request, word_id):
         word.category = data.get('category', word.category)
 
         meanings = data.get('meanings')
-        if meanings is not None:
-            word.meanings = json.dumps(meanings, ensure_ascii=False)
-            # 释义被手动修改后，旧的按词性分组不再可靠，清空以回退到普通展示
-            word.meanings_by_pos = '{}'
+        meanings_by_pos = data.get('meanings_by_pos')
+        if meanings_by_pos is not None:
+            # 前端词性标签结构：以按词性分组为准，同步生成 pos 与 meanings（三字段一致）
+            nd = normalize_word_data({
+                'word': word.word,
+                'pos': data.get('pos', word.pos),
+                'meanings_by_pos': meanings_by_pos,
+            })
+            word.meanings_by_pos = json.dumps(nd['meanings_by_pos'], ensure_ascii=False)
+            word.meanings = json.dumps(nd['meanings'], ensure_ascii=False)
+            if nd['pos']:
+                word.pos = nd['pos']
+        elif meanings is not None:
+            # 旧方式：手动修改释义文本 → 识别词性前缀重建分组
+            nd = normalize_word_data({
+                'word': word.word,
+                'pos': data.get('pos', word.pos),
+                'meanings': meanings,
+            })
+            word.meanings = json.dumps(nd['meanings'], ensure_ascii=False)
+            word.meanings_by_pos = json.dumps(nd['meanings_by_pos'], ensure_ascii=False)
+            if nd['pos']:
+                word.pos = nd['pos']
 
         uncommon_meanings = data.get('uncommon_meanings')
         if uncommon_meanings is not None:
@@ -1910,31 +1950,218 @@ def normalize_phonetic(ph):
     return '/' + ph + '/' if ph else ''
 
 
+# ─── 词性标签：识别与分组 ──────────────────────────────────
+UNCLASSIFIED_POS = '未分类'
+KNOWN_POS_TAGS = {
+    'v.', 'vi.', 'vt.', 'n.', 'adj.', 'adv.', 'prep.', 'pron.',
+    'conj.', 'num.', 'art.', 'aux.', 'interj.', 'int.', 'abbr.',
+    'phr.', 'modal.', 'det.', 'pro.',
+}
+POS_PREFIX_RE = re.compile(r'^([a-zA-Z]+\.)\s*(.*)$')
+
+
+def split_meanings_by_pos(meanings):
+    """把释义文本识别词性前缀，解析为按词性分组字典。
+
+    例如 ['v. 产生', 'v. 生成', 'n. 一代', '生成'] →
+    {'v.': ['产生', '生成'], 'n.': ['一代'], '未分类': ['生成']}
+    """
+    result = {}
+    for m in meanings:
+        mm = str(m).strip()
+        if not mm:
+            continue
+        mo = POS_PREFIX_RE.match(mm)
+        if mo and mo.group(1).lower() in KNOWN_POS_TAGS:
+            key = mo.group(1).lower()
+            text = mo.group(2).strip()
+            if text:
+                result.setdefault(key, []).append(text)
+        else:
+            result.setdefault(UNCLASSIFIED_POS, []).append(mm)
+    return result
+
+
+def normalize_word_data(w):
+    """规范化单个单词数据（音标、字段清理），所有导入入口共用。
+
+    核心规则：pos / meanings / meanings_by_pos 三字段自动同步——
+    - 若传入了 meanings_by_pos（词性标签 → 释义），则自动推导 pos 与 meanings
+    - 若未传 meanings_by_pos，则从 meanings 文本中识别词性前缀自动分组
+    """
+    if not isinstance(w, dict):
+        return None
+    word_text = str(w.get('word', '')).strip()
+    if not word_text:
+        return None
+    phonetic_us = normalize_phonetic(w.get('phonetic_us', '') or w.get('phonetic', ''))
+    phonetic_uk = normalize_phonetic(w.get('phonetic_uk', ''))
+    # 英式音标缺失时用美式填充，避免导入后音标空白
+    if not phonetic_uk and phonetic_us:
+        phonetic_uk = phonetic_us
+
+    def _str_list(v):
+        if isinstance(v, str):
+            return [s.strip() for s in v.replace('；', ';').split(';') if s.strip()]
+        if isinstance(v, (list, tuple)):
+            return [str(s).strip() for s in v if str(s).strip()]
+        return []
+
+    def _str_dict(v):
+        if not isinstance(v, dict):
+            return {}
+        clean = {}
+        for k, vals in v.items():
+            if isinstance(vals, (list, tuple)):
+                items = [str(x).strip() for x in vals if str(x).strip()]
+                if items:
+                    clean[str(k).strip()] = items
+        return clean
+
+    meanings = _str_list(w.get('meanings'))
+    meanings_by_pos = _str_dict(w.get('meanings_by_pos'))
+    pos = str(w.get('pos', '') or '').strip()
+
+    # 未提供按词性分组时，尝试从释义文本中识别词性前缀
+    if not meanings_by_pos:
+        meanings_by_pos = split_meanings_by_pos(meanings)
+
+    # 按词性分组生效时，同步生成 pos（标签串）与 meanings（合并释义）
+    if meanings_by_pos:
+        pos_keys = [k for k in meanings_by_pos if k != UNCLASSIFIED_POS]
+        if pos_keys:
+            pos = '/'.join(pos_keys)
+        merged = []
+        for k in meanings_by_pos:
+            merged.extend(meanings_by_pos[k])
+        if merged:
+            meanings = merged
+
+    return {
+        'word': word_text,
+        'phonetic_us': phonetic_us,
+        'phonetic_uk': phonetic_uk,
+        'pos': pos,
+        'meanings': meanings,
+        'meanings_by_pos': meanings_by_pos,
+        'uncommon_meanings': _str_list(w.get('uncommon_meanings')),
+        'collocations': _str_list(w.get('collocations')),
+        'word_forms': _str_dict(w.get('word_forms')),
+        'example_en': str(w.get('example_en', '') or '').strip(),
+        'example_zh': str(w.get('example_zh', '') or '').strip(),
+    }
+
+
 def normalize_ai_words(words):
-    """规范化 AI 识别结果"""
+    """规范化 AI 识别结果（基于公共规范化函数）"""
     clean = []
     for w in words:
-        if not isinstance(w, dict):
-            continue
-        word_text = str(w.get('word', '')).strip()
-        if not word_text:
-            continue
-        phonetic_us = normalize_phonetic(w.get('phonetic_us', '') or w.get('phonetic', ''))
-        phonetic_uk = normalize_phonetic(w.get('phonetic_uk', ''))
-        # 英式音标缺失时用美式填充，避免导入后音标空白
-        if not phonetic_uk and phonetic_us:
-            phonetic_uk = phonetic_us
-        clean.append({
-            'word': word_text,
-            'phonetic_us': phonetic_us,
-            'phonetic_uk': phonetic_uk,
-            'pos': str(w.get('pos', '') or '').strip(),
-            'meanings': [str(m).strip() for m in (w.get('meanings') or [])
-                         if str(m).strip()],
-            'example_en': str(w.get('example_en', '') or '').strip(),
-            'example_zh': str(w.get('example_zh', '') or '').strip(),
-        })
+        nd = normalize_word_data(w)
+        if nd:
+            clean.append(nd)
     return clean
+
+
+def _ai_chat_once(cfg, prompt, max_tokens=4000):
+    """单次调用 AI（OpenAI 兼容），返回纯文本内容"""
+    payload = {
+        'model': cfg['model_id'],
+        'temperature': 0.5,
+        'max_tokens': max_tokens,
+        'messages': [{'role': 'user', 'content': prompt}],
+    }
+    req = urllib.request.Request(
+        resolve_ai_endpoint(cfg['base_url'], cfg['endpoint']),
+        data=json.dumps(payload).encode('utf-8'),
+        headers=build_ai_headers(cfg['api_key']),
+        method='POST',
+    )
+    with urllib.request.urlopen(req, timeout=180) as resp:
+        result = json.loads(resp.read().decode('utf-8'))
+    content = (result.get('choices', [{}])[0].get('message', {}).get('content', '') or '').strip()
+    if not content:
+        raise RuntimeError('AI 返回为空')
+    return content
+
+
+def _extract_json_object(content):
+    """从 AI 响应中提取 JSON 对象（兼容 ```json 包裹）"""
+    s = content.find('{')
+    e = content.rfind('}')
+    if s == -1 or e == -1 or e <= s:
+        return {}
+    try:
+        return json.loads(content[s:e + 1])
+    except Exception:
+        return {}
+
+
+def ai_complete_words(word_objs):
+    """导入后自动 AI 补全：为缺按词性释义 / 例句的单词批量生成（失败静默，不影响导入结果）"""
+    if not word_objs:
+        return
+    need_pos = [w for w in word_objs if not w.get_meanings_by_pos()]
+    need_ex = [w for w in word_objs if not w.example_en.strip()]
+    if not need_pos and not need_ex:
+        return
+    try:
+        cfg = resolve_ai_model({})
+    except ValueError:
+        return
+    batch = 30
+
+    def _word_line(w):
+        return '%s | %s | %s' % (w.word, w.pos or '', '；'.join(w.get_meanings()))
+
+    try:
+        # 1) 补按词性释义
+        for i in range(0, len(need_pos), batch):
+            chunk = need_pos[i:i + batch]
+            prompt = (
+                '你是英语词典编辑。下面每行是一个单词：单词 | 词性 | 释义。\n'
+                '请为每个单词按词性重新归类其释义，只输出一个严格的 JSON 对象：'
+                '{"单词": {"v.": ["释义"], "n.": ["释义"], ...}, ...}\n'
+                '要求：\n'
+                '- 词性键使用 v./n./adj./adv./prep./conj./pron./num./art./aux./abbr. 等标准缩写\n'
+                '- 释义归入对应词性下，保留原有中文释义，不要新增义项\n'
+                '- 所有单词都要出现在 JSON 中，键名严格等于原单词\n\n'
+                '单词列表：\n' + '\n'.join(_word_line(w) for w in chunk)
+            )
+            try:
+                data = _extract_json_object(_ai_chat_once(cfg, prompt))
+            except Exception:
+                data = {}
+            for w in chunk:
+                item = data.get(w.word)
+                if isinstance(item, dict) and item:
+                    w.meanings_by_pos = json.dumps(item, ensure_ascii=False)
+                    w.save(update_fields=['meanings_by_pos'])
+            time.sleep(0.5)
+        # 2) 补例句
+        for i in range(0, len(need_ex), batch):
+            chunk = need_ex[i:i + batch]
+            prompt = (
+                '你是英语词典编辑。下面每行是一个单词：单词 | 词性 | 释义。\n'
+                '请为每个单词生成 1 个简单、地道的英文例句，并给出对应的中文翻译。\n'
+                '只输出一个严格的 JSON 对象，格式：{"单词": {"en": "英文例句", "zh": "中文翻译"}, ...}\n'
+                '要求：\n'
+                '- 例句 8-20 个词，语法正确，适合考研词汇学习场景\n'
+                '- 所有单词都要出现在 JSON 中，键名严格等于原单词\n\n'
+                '单词列表：\n' + '\n'.join(_word_line(w) for w in chunk)
+            )
+            try:
+                data = _extract_json_object(_ai_chat_once(cfg, prompt))
+            except Exception:
+                data = {}
+            for w in chunk:
+                item = data.get(w.word)
+                if isinstance(item, dict) and item.get('en'):
+                    w.example_en = item['en'].strip()
+                    w.example_zh = (item.get('zh') or '').strip()
+                    w.save(update_fields=['example_en', 'example_zh'])
+            time.sleep(0.5)
+    except Exception:
+        pass
 
 
 def resolve_ai_endpoint(base_url, endpoint):

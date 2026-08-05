@@ -299,15 +299,16 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// 优先按词性分组展示释义：v. 释义；释义
+// 按词性分组展示释义（与背诵页一致的 pos-group 样式）
 function formatFocusMeanings(word) {
   var byPos = (word && word.meanings_by_pos) || {};
   var posKeys = Object.keys(byPos).filter(function (k) { return byPos[k] && byPos[k].length; });
   if (posKeys.length) {
     return posKeys.map(function (p) {
-      return '<span class="meaning-pos">' + escapeHtml(p) + '</span> ' +
-        byPos[p].map(function (m) { return escapeHtml(m); }).join('；');
-    }).join('<br>');
+      return '<div class="pos-group"><span class="meaning-pos">' + escapeHtml(p) + '</span> ' +
+        byPos[p].map(function (m) { return '<span class="meaning-item">' + escapeHtml(m) + '</span>'; }).join(' ') +
+      '</div>';
+    }).join('');
   }
   var meanings = word ? word.meanings : null;
   if (Array.isArray(meanings)) return meanings.map(escapeHtml).join('；');
@@ -329,7 +330,9 @@ function focusFlip() {
     document.getElementById('focusPhonetic').textContent = word.phonetic_us || '';
     document.getElementById('focusPos').textContent = word.pos || '';
     document.getElementById('focusMeaning').innerHTML = formatFocusMeanings(word);
-    document.getElementById('focusExample').textContent = '';
+    // 与背诵页一致：一次翻转同时显示所有词性释义 + 例句
+    document.getElementById('focusExample').textContent =
+      [word.example_en, word.example_zh].filter(Boolean).join('\n');
     details.style.display = 'block';
 
     isFlipped = true;

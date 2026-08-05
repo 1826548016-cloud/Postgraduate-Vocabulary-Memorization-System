@@ -53,7 +53,7 @@ window.AssistantPanel = (function () {
 
   function renderMessages(msgs) {
     if (!msgs || !msgs.length) {
-      setBody('<div class="assistant-empty">你好，我是你的英语学习小助手！<br>可以问我单词的考法、辨析、搭配、记忆技巧…</div>');
+      setBody('<div class="assistant-empty">你好，我是你的智能助手！<br>随便问我什么都可以：单词考法、学习规划、日常聊天、编程问题…</div>');
       return;
     }
     var html = '';
