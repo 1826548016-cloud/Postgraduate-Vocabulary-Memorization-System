@@ -11,7 +11,8 @@ datas = [
     ('words/templates', 'words/templates'),
     ('words/static', 'words/static'),
     ('data/hongbaoshu.json', 'data'),
-    ('db.sqlite3', '.'),
+    # 打包前先运行 python make_seed_db.py 生成"仅词库"种子数据库
+    ('packaging/db.sqlite3', '.'),
 ]
 # reportlab 需要字体/CMap 等数据文件；admin 需要模板和静态资源
 datas += collect_data_files('reportlab')
