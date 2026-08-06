@@ -64,7 +64,7 @@
 - 首次运行会自动把内置数据库复制到用户数据目录 `%APPDATA%\VocabApp`，之后的学习数据都保存在那里，升级软件不丢数据。
 - 启动后会自动打开浏览器进入系统，默认地址为 <http://127.0.0.1:8010/>；**关闭弹出的黑色窗口即退出程序**。
 - **联网提示**：AI 功能（小助手、AI 导入、AI 速记）和在线发音需要联网，其余功能离线也能正常使用。
-- 改动代码后重新打包：先安装打包依赖 `pip install -r requirements-build.txt`，再在项目根目录依次执行 `python make_seed_db.py`（生成不含个人数据和 API Key 的种子数据库）和 `pyinstaller vocab_app.spec --noconfirm`，新产物在 `dist/VocabApp/`。
+- 改动代码后重新打包：先安装打包依赖 `pip install -r requirements-build.txt`，再在项目根目录依次执行 `python make_seed_db.py`和 `pyinstaller vocab_app.spec --noconfirm`，新产物在 `dist/VocabApp/`。
 
 ### 方式二：源码运行（需要 Python 3.13）
 

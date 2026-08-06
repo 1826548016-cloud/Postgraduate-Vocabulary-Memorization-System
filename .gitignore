@@ -14,7 +14,3 @@ media/
 *.log
 .DS_Store
 
-# 打包产物
-build/
-dist/
-packaging/
