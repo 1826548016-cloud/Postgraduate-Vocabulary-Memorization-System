@@ -979,6 +979,7 @@ def api_export_pdf(request):
     pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
 
     export_type = request.GET.get('type', 'all')
+    dictation_mode = request.GET.get('dictation', '')  # 'en2zh' or 'zh2en'
     unit_num = request.GET.get('unit')
     search = request.GET.get('search', '')
     category = request.GET.get('category', '')
@@ -1017,6 +1018,77 @@ def api_export_pdf(request):
                             leftMargin=15 * mm, rightMargin=15 * mm)
     styles = getSampleStyleSheet()
 
+    # 默写纸模式
+    if dictation_mode:
+        if dictation_mode == 'en2zh':
+            title_text = f'{title_text} - 默写纸（看英文写中文）'
+        else:
+            title_text = f'{title_text} - 默写纸（看中文写英文）'
+
+        title_style = ParagraphStyle('title', fontName='STSong-Light', fontSize=14,
+                                     leading=20, spaceAfter=10, alignment=1)
+
+        elements = [Paragraph(title_text, title_style),
+                    Spacer(1, 6 * mm)]
+
+        table_data = []
+        if dictation_mode == 'en2zh':
+            # 看英文写中文：显示英文，中文留空
+            table_data.append(['序号', '单词', '词性', '中文释义（默写）'])
+            for i, w in enumerate(words, 1):
+                table_data.append([
+                    str(i),
+                    w.word,
+                    w.pos or '',
+                    '',  # 留空供默写
+                ])
+        else:
+            # 看中文写英文：显示中文，英文留空
+            table_data.append(['序号', '中文释义', '词性', '单词（默写）'])
+            for i, w in enumerate(words, 1):
+                meanings_str = '; '.join(w.get_meanings()[:3])
+                table_data.append([
+                    str(i),
+                    meanings_str,
+                    w.pos or '',
+                    '',  # 留空供默写
+                ])
+
+        if len(table_data) > 1:
+            # 根据模式调整列宽
+            if dictation_mode == 'en2zh':
+                col_widths = [14 * mm, 50 * mm, 18 * mm, 78 * mm]
+            else:
+                col_widths = [14 * mm, 68 * mm, 18 * mm, 60 * mm]
+
+            t = Table(table_data, colWidths=col_widths, repeatRows=1)
+            t.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), 'STSong-Light'),  # 全部使用STSong-Light以支持音标
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('GRID', (0, 0), (-1, -1), 0.3, colors.grey),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.9, 0.9, 0.9)),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.Color(0.95, 0.95, 0.95)]),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ]))
+            elements.append(t)
+        else:
+            cn_style = ParagraphStyle('cn', fontName='STSong-Light', fontSize=10,
+                                      leading=16, spaceAfter=4)
+            elements.append(Paragraph('暂无单词数据', cn_style))
+
+        doc.build(elements)
+        buf.seek(0)
+
+        filename = f'hongbaoshu_{export_type}_dictation.pdf'
+        return FileResponse(buf, content_type='application/pdf',
+                            filename=filename, as_attachment=True)
+
+    # 正常导出模式（包含音标）
     title_style = ParagraphStyle('title', fontName='STSong-Light', fontSize=14,
                                  leading=20, spaceAfter=10, alignment=1)
 
@@ -1025,7 +1097,6 @@ def api_export_pdf(request):
 
     total_rows = len(words)
     table_data = []
-    # Header (no phonetic to avoid garbled text)
     table_data.append(['序号', '单词', '词性', '释义'])
     for i, w in enumerate(words, 1):
         meanings_str = '; '.join(w.get_meanings()[:3])
@@ -1037,15 +1108,10 @@ def api_export_pdf(request):
         ])
 
     if len(table_data) > 1:
-        col_widths = [14 * mm, 44 * mm, 18 * mm, 79 * mm]
+        col_widths = [14 * mm, 50 * mm, 18 * mm, 78 * mm]
         t = Table(table_data, colWidths=col_widths, repeatRows=1)
         t.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, 0), 'STSong-Light'),
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTNAME', (1, 1), (1, -1), 'Helvetica'),
-            ('FONTNAME', (0, 0), (0, -1), 'STSong-Light'),
-            ('FONTNAME', (3, 0), (3, -1), 'STSong-Light'),
-            ('FONTNAME', (4, 0), (4, -1), 'STSong-Light'),
+            ('FONTNAME', (0, 0), (-1, -1), 'STSong-Light'),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('FONTSIZE', (0, 0), (-1, 0), 9),
             ('GRID', (0, 0), (-1, -1), 0.3, colors.grey),

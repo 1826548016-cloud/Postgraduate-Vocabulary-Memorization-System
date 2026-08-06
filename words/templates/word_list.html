@@ -141,7 +141,21 @@
       <button class="btn btn-secondary" onclick="document.getElementById('filterPanel').open = !document.getElementById('filterPanel').open"><i class="ph ph-faders"></i> 筛选</button>
       <details class="word-actions">
         <summary title="更多操作"><i class="ph ph-dots-three"></i></summary>
-        <div class="word-action-menu"><button onclick="exportPDF('all')">导出全部 PDF</button><button onclick="exportPDF('unit')">导出当前单元</button><button onclick="exportPDF('filtered')">导出筛选结果</button><button onclick="exportPDF('favorites')">导出收藏词</button><button class="danger" onclick="exportPDF('errors')">导出易错词</button></div>
+        <div class="word-action-menu">
+          <button onclick="exportPDF('all')">导出全部 PDF</button>
+          <button onclick="exportPDF('unit')">导出当前单元</button>
+          <button onclick="exportPDF('filtered')">导出筛选结果</button>
+          <button onclick="exportPDF('favorites')">导出收藏词</button>
+          <button class="danger" onclick="exportPDF('errors')">导出易错词</button>
+          <hr style="margin: 6px 0; border: none; border-top: 1px solid var(--c-border);">
+          <div style="padding: 4px 9px; font-size: var(--fs-xs); color: var(--c-text-3);">默写纸导出:</div>
+          <button onclick="exportPDF('all', 'en2zh')">看英文写中文(全部)</button>
+          <button onclick="exportPDF('unit', 'en2zh')">看英文写中文(单元)</button>
+          <button onclick="exportPDF('filtered', 'en2zh')">看英文写中文(筛选)</button>
+          <button onclick="exportPDF('all', 'zh2en')">看中文写英文(全部)</button>
+          <button onclick="exportPDF('unit', 'zh2en')">看中文写英文(单元)</button>
+          <button onclick="exportPDF('filtered', 'zh2en')">看中文写英文(筛选)</button>
+        </div>
       </details>
       <button class="btn btn-primary" onclick="location.href='{% url 'words:ai_import' %}'"><i class="ph ph-sparkle"></i> AI 导入</button>
       <button class="btn btn-primary" onclick="openWordModal('add')"><i class="ph ph-plus"></i> 添加单词</button>
@@ -1016,9 +1030,13 @@
   loadWords(currentPage);
 
   // ===== PDF Export =====
-  function exportPDF(type) {
+  function exportPDF(type, dictationMode) {
     var params = new URLSearchParams();
     params.set('type', type);
+
+    if (dictationMode) {
+      params.set('dictation', dictationMode);
+    }
 
     if (type === 'unit') {
       var unitVal = document.getElementById('unitFilter').value;
@@ -1041,7 +1059,11 @@
     }
 
     window.open('/api/export/pdf/?' + params.toString(), '_blank');
-    showToast('正在生成 PDF...', 'success');
+    if (dictationMode) {
+      showToast('正在生成默写纸 PDF...', 'success');
+    } else {
+      showToast('正在生成 PDF...', 'success');
+    }
   }
 
   // ===== Unit CRUD =====

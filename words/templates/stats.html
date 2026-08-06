@@ -89,6 +89,8 @@
     <div class="flex gap-4" style="flex-wrap: wrap;">
       <button class="btn btn-primary" onclick="exportPDF('all')">导出全部单词 PDF</button>
       <button class="btn btn-secondary" onclick="exportPDF('errors')">导出易错词 PDF</button>
+      <button class="btn btn-secondary" onclick="exportPDF('all', 'en2zh')">看英文写中文(全部)</button>
+      <button class="btn btn-secondary" onclick="exportPDF('all', 'zh2en')">看中文写英文(全部)</button>
     </div>
   </div>
 </div>
@@ -353,8 +355,13 @@ function renderErrorWords(errorWords) {
 }
 
 // ===== PDF Export =====
-function exportPDF(type) {
-  window.open('/api/export/pdf/?type=' + type, '_blank');
+function exportPDF(type, dictationMode) {
+  var params = new URLSearchParams();
+  params.set('type', type);
+  if (dictationMode) {
+    params.set('dictation', dictationMode);
+  }
+  window.open('/api/export/pdf/?' + params.toString(), '_blank');
 }
 
 // ===== Initial Load =====
