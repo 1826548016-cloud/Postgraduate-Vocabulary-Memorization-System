@@ -93,6 +93,7 @@
 d:\word
 ├── manage.py
 ├── run_desktop.py           # 桌面版启动入口（打包 exe 用）
+├── make_seed_db.py          # 生成"仅词库"种子数据库（打包前运行）
 ├── vocab_app.spec           # PyInstaller 打包配置
 ├── requirements.txt        # Python 依赖（pip install -r requirements.txt）
 ├── requirements-build.txt  # 打包 exe 用依赖
@@ -114,12 +115,14 @@ d:\word
 │       └── optimize_pos_meanings.py # AI 按词性归类释义
 ├── data/hongbaoshu.json    # 内置考研词库数据
 ├── backups/                # 备份文件目录（设置页下载备份生成）
-├── db.sqlite3              # 数据库（开发模式）
+├── db.sqlite3              # 数据库（开发模式，含个人数据，不入库）
+├── packaging/db.sqlite3    # 打包用种子数据库（仅词库，由 make_seed_db.py 生成，不入库）
 └── dist/VocabApp/          # 打包产物：桌面版 exe（可直接分发）
 ```
 ## 数据备份
 - 页面内「导出备份」生成 JSON 到 `backups/` 目录，可随时「恢复备份」
 - 也可直接复制 `db.sqlite3` 文件备份
 - 桌面版 exe 的数据在 `%APPDATA%\VocabApp`，直接复制里面的 `db.sqlite3` 即可备份
+- **隐私说明**：exe 内置的种子数据库只含词库，不含个人学习数据和 API Key；打包前请先运行 `python make_seed_db.py` 重新生成，避免把个人数据带进软件包
 
 ## 欢迎各位考研人使用 不要把梦想埋没
