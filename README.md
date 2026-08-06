@@ -1,6 +1,7 @@
-# 智能单词背诵平台
+# 智能单词背诵平台（v2.0.0）
 
-# 目前项目已完成多版本迭代，项目正在上线测试中，后续 bug 修复将会继续上传更新，欢迎反馈问题或建议。
+目前项目已完成多版本迭代，桌面版第一版已完成，可以使用 Windows PC 桌面版运行，后续将更新并修复 bug，如果你有更好的建议或反馈，欢迎交流！
+
 基于 Django 的考研词汇背诵 Web 应用，支持 AI 智能辅助背诵、词库管理、多模式背诵、模拟考试、学习统计，开箱即用（SQLite 本地存储，无需外部数据库，如需使用其他数据库请自行在 settings 里面更改配置）。
 
 ![功能预览（浅色 · 暖纸书卷风）](a.png)
@@ -20,8 +21,8 @@
 - **薄弱词**（考前重点突破）
   - 自动汇总学过但未掌握、历史出错的单词，按错误次数从高到低排序
   - 顶部展示薄弱词总数、未掌握数、累计错误次数、已复习数，考前集中巩固
-- **小助手（背诵 / 专注）**
-  - 背诵时可以调用小助手，向 AI 提问单词考法、辨析、搭配、记忆技巧等（LLM 模型）
+- **小助手（背诵 / 复习 / 专注）**
+  - 背诵、复习、专注三种模式都可以调用小助手，向 AI 提问单词考法、辨析、搭配、记忆技巧等（LLM 模型），对话历史三处互通
 - **每日打卡（自动）**
   - 每天学满 30 个单词自动打卡，无需手动操作
 - **单词打卡日历热力图**
@@ -53,23 +54,48 @@
 - Python 3.13 + Django 4.2
 - SQLite（零配置）
 - 原生 HTML / CSS / JS，ECharts 图表，Phonetic 在线发音
+- 桌面版：PyInstaller 打包为 Windows exe，waitress 本地服务，无需安装 Python
 
-## 快速开始
-默认 Python 环境已安装，如未安装请安装 Python 环境并将其配置到环境变量中。
-首次使用先安装依赖：
+## 安装与使用
 
-```
-pip install -r requirements.txt
-```
+### 方式一：桌面版 exe（推荐，无需装 Python）
 
-为了节省你的时间，请使用你的 AI 编程工具，输入"启动项目"，即可启动项目。
+- 整个 `dist/VocabApp/` 文件夹就是软件本体，拷贝到任意 Windows 10/11 64 位电脑，双击 `VocabApp.exe` 即可使用。
+- 首次运行会自动把内置数据库复制到用户数据目录 `%APPDATA%\VocabApp`，之后的学习数据都保存在那里，升级软件不丢数据。
+- 启动后会自动打开浏览器进入系统，默认地址为 <http://127.0.0.1:8010/>；**关闭弹出的黑色窗口即退出程序**。
+- **联网提示**：AI 功能（小助手、AI 导入、AI 速记）和在线发音需要联网，其余功能离线也能正常使用。
+- 改动代码后重新打包：先安装打包依赖 `pip install -r requirements-build.txt`，再在项目根目录执行 `pyinstaller vocab_app.spec --noconfirm`，新产物在 `dist/VocabApp/`。
+
+### 方式二：源码运行（需要 Python 3.13）
+
+1. 安装依赖：
+   ```
+   pip install -r requirements.txt
+   ```
+2. 启动：
+   ```
+   python run_desktop.py
+   ```
+   或传统方式 `python manage.py runserver`，然后浏览器打开 <http://127.0.0.1:8000/>。
+
+也可以直接用 AI 编程工具打开项目，输入"启动项目"。
+
 ## AI 模型配置
-进入 `/settings/` 页面进行操作设置。
+基础背诵功能开箱即用；AI 功能（小助手、AI 导入、AI 速记）需要先配置模型后才能使用。
+
+1. 进入 `/settings/` 页面，在「AI 模型」中添加一个 OpenAI 兼容接口的模型配置。
+2. 填写服务商接口地址（Base URL）、API Key 和模型 ID（推荐使用 DeepSeek 模型）。
+3. 点击「添加模型」时会自动验证连接，成功后即保存；小助手、AI 导入、AI 速记共用这份配置。
+
+如果某个模型识别不了图片，可在 AI 导入时改用纯文本或文件方式输入。
 ## 项目结构
 ```
 d:\word
 ├── manage.py
+├── run_desktop.py           # 桌面版启动入口（打包 exe 用）
+├── vocab_app.spec           # PyInstaller 打包配置
 ├── requirements.txt        # Python 依赖（pip install -r requirements.txt）
+├── requirements-build.txt  # 打包 exe 用依赖
 ├── vocab_project/          # Django 项目配置
 │   ├── settings.py
 │   └── urls.py
@@ -88,10 +114,12 @@ d:\word
 │       └── optimize_pos_meanings.py # AI 按词性归类释义
 ├── data/hongbaoshu.json    # 内置考研词库数据
 ├── backups/                # 备份文件目录（设置页下载备份生成）
-└── db.sqlite3              # 数据库
+├── db.sqlite3              # 数据库（开发模式）
+└── dist/VocabApp/          # 打包产物：桌面版 exe（可直接分发）
 ```
 ## 数据备份
 - 页面内「导出备份」生成 JSON 到 `backups/` 目录，可随时「恢复备份」
 - 也可直接复制 `db.sqlite3` 文件备份
+- 桌面版 exe 的数据在 `%APPDATA%\VocabApp`，直接复制里面的 `db.sqlite3` 即可备份
 
 ## 欢迎各位考研人使用 不要把梦想埋没

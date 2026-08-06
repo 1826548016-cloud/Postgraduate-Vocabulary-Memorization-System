@@ -62,6 +62,7 @@
     <button id="speakBtn" class="btn btn-secondary btn-sm" title="发音"><i class="ph ph-speaker-high"></i><span class="text-sm"> 发音</span></button>
     <button id="noteBtn" class="btn btn-secondary btn-sm" title="记笔记 / 查看笔记"><i class="ph ph-note-pencil"></i><span class="text-sm"> 笔记</span></button>
     <button id="quickMemoryBtn" class="btn btn-secondary btn-sm" title="AI 速记 / 查看速记"><i class="ph ph-lightning"></i><span class="text-sm"> 速记</span></button>
+    <button id="assistantBtn" class="btn btn-secondary btn-sm" title="问小助手"><i class="ph ph-chat-circle-text"></i><span class="text-sm"> 小助手</span></button>
   </div>
   <div id="wordText" class="word-text">加载中…</div>
   <div id="wordPhonetic" class="word-phonetic">—</div>
@@ -199,6 +200,7 @@
     if (window.WordExtPanel) WordExtPanel.closeExtPanel();
 
     currentWord = wordsData[currentIndex];
+    if (window.AssistantPanel) AssistantPanel.refreshCurrentWord();
     revealDone = false;
 
     els.wordText.textContent = currentWord.word || '';
@@ -335,6 +337,9 @@
   document.getElementById('speakBtn').addEventListener('click', replayAudio);
   document.getElementById('prevBtn').addEventListener('click', goPrev);
   document.getElementById('nextBtn').addEventListener('click', goNext);
+  document.getElementById('assistantBtn').addEventListener('click', function () {
+    if (window.AssistantPanel) AssistantPanel.open();
+  });
 
   // 进度条拖动跳转
   var slider = document.getElementById('progressSlider');

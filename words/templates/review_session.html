@@ -120,6 +120,7 @@
     <button id="speakBtn" class="btn btn-secondary btn-sm" title="发音"><i class="ph ph-speaker-high"></i><span class="text-sm"> 发音</span></button>
     <button id="noteBtn" class="btn btn-secondary btn-sm" title="记笔记 / 查看笔记"><i class="ph ph-note-pencil"></i><span class="text-sm"> 笔记</span></button>
     <button id="quickMemoryBtn" class="btn btn-secondary btn-sm" title="AI 速记 / 查看速记"><i class="ph ph-lightning"></i><span class="text-sm"> 速记</span></button>
+    <button id="assistantBtn" class="btn btn-secondary btn-sm" title="问小助手"><i class="ph ph-chat-circle-text"></i><span class="text-sm"> 小助手</span></button>
   </div>
   <div id="wordText" class="word-text">加载中…</div>
   <div id="wordPhonetic" class="word-phonetic">—</div>
@@ -150,6 +151,9 @@
 
   <!-- 笔记 / 速记 展开区（共享组件） -->
   {% include '_word_ext_panel.html' %}
+
+  <!-- 小助手（共享组件，对话历史互通） -->
+  {% include '_assistant_panel.html' %}
 </div>
 
 <div id="completionCard" class="card word-card hidden">
@@ -271,6 +275,7 @@
 
   function renderWord(word) {
     currentWord = word;
+    if (window.AssistantPanel) AssistantPanel.refreshCurrentWord();
     revealDone = false;
     expandAllTmp = false;
     sessionStorage.setItem('vocab-review-idx', currentIndex);
@@ -453,6 +458,9 @@
   document.getElementById('speakBtn').addEventListener('click', replayAudio);
   document.getElementById('prevBtn').addEventListener('click', goPrev);
   document.getElementById('nextBtn').addEventListener('click', goNext);
+  document.getElementById('assistantBtn').addEventListener('click', function () {
+    if (window.AssistantPanel) AssistantPanel.open();
+  });
 
   // 复习模式切换
   function setReviewMode(mode) {

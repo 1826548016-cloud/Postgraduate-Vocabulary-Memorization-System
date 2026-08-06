@@ -112,6 +112,7 @@
         <button class="btn btn-secondary btn-sm" onclick="replayFocusAudio()" title="发音"><i class="ph ph-speaker-high"></i> 发音</button>
         <button id="noteBtn" class="btn btn-secondary btn-sm" title="记笔记 / 查看笔记"><i class="ph ph-note-pencil"></i> 笔记</button>
         <button id="quickMemoryBtn" class="btn btn-secondary btn-sm" title="AI 速记 / 查看速记"><i class="ph ph-lightning"></i> 速记</button>
+        <button class="btn btn-secondary btn-sm" onclick="AssistantPanel.open()" title="问小助手"><i class="ph ph-chat-circle-text"></i> 小助手</button>
       </div>
       <div id="focusDetails" style="display: none;">
         <div class="word-phonetic" id="focusPhonetic" style="margin-bottom: 8px;"></div>
@@ -296,6 +297,7 @@ function focusRender() {
   }
 
   var word = focusWords[focusIndex];
+  if (window.AssistantPanel) AssistantPanel.refreshCurrentWord();
   isFlipped = false;
 
   // 切换单词时收起笔记/速记展开区
@@ -534,7 +536,7 @@ document.addEventListener('keydown', function (e) {
 document.getElementById('focusCard').addEventListener('click', function (e) {
   var t = e.target;
   if (t.tagName === 'BUTTON' || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'A' || t.tagName === 'SELECT') return;
-  if (t.closest && (t.closest('#wordExtPanel') || t.closest('#assistantPanel'))) return;
+  if (t.closest && (t.closest('#wordExtPanel') || t.closest('#assistantPanel') || t.closest('#assistantBackdrop'))) return;
   focusFlip();
 });
 
