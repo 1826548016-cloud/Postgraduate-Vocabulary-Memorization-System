@@ -1,0 +1,504 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}设置 - 考研单词背诵系统{% endblock %}
+{% block page_title %}设置{% endblock %}
+
+{% block extra_head %}
+<style>
+  .settings-page { max-width: 1080px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+  .settings-page > .card { margin: 0 !important; }
+  .settings-page > .card:nth-of-type(3), .settings-page > .card:nth-of-type(4), .settings-page > .card:nth-of-type(5), .settings-page > .card:nth-of-type(6) { grid-column: 1 / -1; }
+  .settings-page .card-header { display: flex; align-items: center; gap: 7px; }
+  .settings-page .card-header::before { color: var(--c-green); font-family: sans-serif; }
+  .settings-page > .card:nth-of-type(1) .card-header::before { content: '◐'; }
+  .settings-page > .card:nth-of-type(2) .card-header::before { content: '♪'; }
+  .settings-page > .card:nth-of-type(3) .card-header::before { content: '◎'; }
+  .settings-page > .card:nth-of-type(4) .card-header::before { content: '✦'; }
+  .settings-page > .card:nth-of-type(5) .card-header::before { content: '▣'; }
+  .settings-page .form-group:last-of-type { margin-bottom: 0; }
+  .settings-page .form-group > .flex.items-center { background: var(--c-surface-2); }
+  .settings-page > .card:nth-of-type(6) { color: var(--c-text-2); }
+  @media (max-width: 760px) { .settings-page { grid-template-columns: 1fr; } .settings-page > .card { grid-column: 1 / -1 !important; } }
+</style>
+{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<div class="settings-page">
+
+<!-- Display Settings -->
+<div class="card" style="margin-bottom: 24px;">
+  <div class="card-header">显示设置</div>
+
+  <div class="form-group">
+    <label class="form-label">字体大小</label>
+    <div class="flex gap-2">
+      <button class="btn btn-secondary btn-sm font-size-btn" data-size="small" id="fontSmall">小</button>
+      <button class="btn btn-primary btn-sm font-size-btn" data-size="medium" id="fontMedium">中</button>
+      <button class="btn btn-secondary btn-sm font-size-btn" data-size="large" id="fontLarge">大</button>
+      <button class="btn btn-primary btn-sm" onclick="applyFontSize()" style="margin-left: 12px;">应用</button>
+    </div>
+  </div>
+
+  <div class="form-group" style="margin-top: 16px;">
+    <label class="form-label">主题模式</label>
+    <div class="flex items-center gap-4" style="padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+      <span>浅色</span>
+      <label class="flex items-center gap-2" style="cursor: pointer;">
+        <input type="checkbox" id="darkModeToggle" onchange="toggleDarkMode()" {% if settings.dark_mode %}checked{% endif %}>
+        <span>深色模式</span>
+      </label>
+    </div>
+  </div>
+</div>
+
+<!-- Pronunciation Settings -->
+<div class="card" style="margin-bottom: 24px;">
+  <div class="card-header">发音设置</div>
+
+  <div class="form-group">
+    <label class="form-label">发音开关</label>
+    <div class="flex items-center gap-4" style="padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+      <span>关闭</span>
+      <label class="flex items-center gap-2" style="cursor: pointer;">
+        <input type="checkbox" id="pronunciationToggle" {% if settings.pronunciation_on %}checked{% endif %}>
+        <span>开启单词发音</span>
+      </label>
+    </div>
+  </div>
+
+  <div class="form-group" style="margin-top: 16px;">
+    <label class="form-label">发音类型</label>
+    <div class="flex gap-2">
+      <button class="btn btn-primary voice-btn" data-voice="us" id="voiceUS">美音 🇺🇸</button>
+      <button class="btn btn-secondary voice-btn" data-voice="uk" id="voiceUK">英音 🇬🇧</button>
+    </div>
+  </div>
+
+  <div class="form-group" style="margin-top: 16px;">
+    <label class="form-label">语速：<span id="rateValue">{{ settings.speech_rate }}</span>x</label>
+    <input type="range" class="form-input w-full" id="speechRate" min="0.5" max="2.0" step="0.1" value="{{ settings.speech_rate }}" oninput="document.getElementById('rateValue').textContent = this.value" style="padding: 0; height: 6px;">
+  </div>
+
+  <div class="form-group" style="margin-top: 16px;">
+    <label class="form-label">自动朗读</label>
+    <div class="flex items-center gap-4" style="padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+      <span>关闭</span>
+      <label class="flex items-center gap-2" style="cursor: pointer;">
+        <input type="checkbox" id="autoReadToggle" {% if settings.auto_read %}checked{% endif %}>
+        <span>翻到单词时自动朗读</span>
+      </label>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" onclick="savePronunciationSettings()" style="margin-top: 16px;">保存发音设置</button>
+</div>
+
+<!-- Daily Targets -->
+<div class="card" style="margin-bottom: 24px;">
+  <div class="card-header">每日目标</div>
+
+  <div class="card-grid">
+    <div class="form-group">
+      <label class="form-label">每日新词目标</label>
+      <input type="number" class="form-input" id="dailyNewTarget" value="{{ settings.daily_new_target }}" min="1" max="200">
+      <div class="form-help">建议 20-50 个</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">每日复习目标</label>
+      <input type="number" class="form-input" id="dailyReviewTarget" value="{{ settings.daily_review_target }}" min="1" max="300">
+      <div class="form-help">建议 40-100 个</div>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" onclick="saveDailyTargets()" style="margin-top: 12px;">保存目标</button>
+</div>
+
+<!-- AI 模型管理 -->
+<div class="card" id="ai-models" style="margin-bottom: 24px; scroll-margin-top: 16px;">
+  <div class="card-header">AI 模型</div>
+  <div class="text-sm text-secondary" style="margin: 4px 0 12px;">
+    <p style="margin: 0 0 4px;">集中管理用于 <strong>AI 单词导入（图片 / 文本 / 文件识别）、AI 复审、速记生成、小助手问答</strong> 的模型，配置保存在数据库中。未单独指定时，各功能会自动使用「已启用」的模型。</p>
+  </div>
+
+  <div class="flex justify-between items-center" style="margin-bottom: 12px;">
+    <span class="text-sm text-secondary"><span id="modelCount">0</span> 个模型</span>
+    <button class="btn btn-primary btn-sm" onclick="openAddModel()"><i class="ph ph-plus"></i> 添加模型</button>
+  </div>
+
+  <div id="modelList" class="flex flex-col" style="gap: 8px;"></div>
+
+  <!-- 小助手模型 -->
+  <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--c-border-light);">
+    <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 10px;">
+      <div>
+        <div style="font-weight: 500;"><i class="ph ph-chat-circle-text" style="color: var(--c-green);"></i> 小助手模型</div>
+        <div class="text-sm text-secondary">背诵 / 专注 / 复习中小助手问答使用的模型，切换后立即生效</div>
+      </div>
+      <select id="assistantModelSelect" class="form-input" style="min-width: 240px;" onchange="saveAssistantModel(this.value)">
+        <option value="">自动（使用第一个启用的模型）</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- Data Management -->
+<div class="card" style="margin-bottom: 24px;">
+  <div class="card-header">数据管理</div>
+
+  <div class="flex flex-col gap-4">
+    <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 12px;">
+      <div>
+        <div style="font-weight: 500;">备份数据</div>
+        <div class="text-sm text-secondary">下载所有学习进度、设置、打卡记录</div>
+      </div>
+      <button class="btn btn-primary" onclick="backupData()">下载备份</button>
+    </div>
+
+    <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 12px;">
+      <div>
+        <div style="font-weight: 500;">恢复数据</div>
+        <div class="text-sm text-secondary">从备份文件恢复学习进度</div>
+      </div>
+      <label class="btn btn-secondary" style="cursor: pointer;">
+        选择备份文件
+        <input type="file" id="restoreFile" accept=".json" style="display: none;" onchange="restoreData(this)">
+      </label>
+    </div>
+
+    <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 12px;">
+      <div>
+        <div style="font-weight: 500;">小助手对话记录</div>
+        <div class="text-sm text-secondary">清空背诵 / 专注 / 复习中小助手的全部聊天记录</div>
+      </div>
+      <button class="btn btn-danger" onclick="clearAssistantHistory()">清空对话</button>
+    </div>
+
+    <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 12px;">
+      <div>
+<div style="font-weight: 500; color: var(--c-red);">重置学习进度</div>
+        <div class="text-sm text-secondary">清空所有学习进度、打卡记录和会话数据（单词数据保留）</div>
+      </div>
+      <button class="btn btn-danger" onclick="doResetConfirm()">重置进度</button>
+    </div>
+  </div>
+</div>
+
+<!-- About -->
+<div class="card">
+  <div class="card-header">关于</div>
+  <div class="text-secondary">
+    <p>智能单词背诵平台 v2.0.0</p>
+    <p>一个高效的考研单词背诵应用</p>
+    <p>技术栈：Django + Chart.js + Browser TTS</p>
+    <p>最后更新于：2026年8月6日</p>
+    <p>声明：仅用于学习和研究，不涉及任何商业用途。</p>
+  </div>
+</div>
+
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ===== Initialize =====
+document.addEventListener('DOMContentLoaded', function () {
+  initVoiceButtons();
+  initFontButtons();
+  loadAIModels();
+});
+
+// ===== Font Size =====
+function initFontButtons() {
+  var currentSize = localStorage.getItem('vocab-font-size') || '{% if settings.font_size %}{{ settings.font_size }}{% else %}medium{% endif %}';
+  document.querySelectorAll('.font-size-btn').forEach(function (btn) {
+    btn.className = 'btn btn-secondary btn-sm font-size-btn';
+  });
+  var activeBtn = document.getElementById('font' + currentSize.charAt(0).toUpperCase() + currentSize.slice(1));
+  if (activeBtn) activeBtn.className = 'btn btn-primary btn-sm font-size-btn';
+
+  document.querySelectorAll('.font-size-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.font-size-btn').forEach(function (b) {
+        b.className = 'btn btn-secondary btn-sm font-size-btn';
+      });
+      this.className = 'btn btn-primary btn-sm font-size-btn';
+    });
+  });
+}
+
+function applyFontSize() {
+  var selected = document.querySelector('.font-size-btn.btn-primary');
+  if (!selected) return;
+  var size = selected.dataset.size;
+  localStorage.setItem('vocab-font-size', size);
+  // Save to backend
+  VOCAB_API.post('/api/settings/', { font_size: size }).then(function () {
+    showToast('字体大小已更新为 ' + size, 'success');
+  });
+}
+
+// ===== Dark Mode =====
+function toggleDarkMode() {
+  var checked = document.getElementById('darkModeToggle').checked;
+  var theme = checked ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('vocab-theme', theme);
+  VOCAB_API.post('/api/settings/', { dark_mode: checked });
+  showToast('主题已切换', 'success');
+}
+
+// ===== Voice Settings =====
+function initVoiceButtons() {
+  var currentVoice = '{% if settings.voice_type %}{{ settings.voice_type }}{% else %}us{% endif %}';
+  document.querySelectorAll('.voice-btn').forEach(function (btn) {
+    btn.className = 'btn btn-secondary voice-btn';
+  });
+  var activeVoiceBtn = currentVoice === 'us' ? document.getElementById('voiceUS') : document.getElementById('voiceUK');
+  if (activeVoiceBtn) activeVoiceBtn.className = 'btn btn-primary voice-btn';
+
+  document.querySelectorAll('.voice-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.voice-btn').forEach(function (b) {
+        b.className = 'btn btn-secondary voice-btn';
+      });
+      this.className = 'btn btn-primary voice-btn';
+    });
+  });
+}
+
+async function savePronunciationSettings() {
+  var pronunciationOn = document.getElementById('pronunciationToggle').checked;
+  var voiceType = document.querySelector('.voice-btn.btn-primary');
+  var voice = voiceType ? voiceType.dataset.voice : 'us';
+  var speechRate = parseFloat(document.getElementById('speechRate').value);
+  var autoRead = document.getElementById('autoReadToggle').checked;
+
+  try {
+    var res = await VOCAB_API.post('/api/settings/', {
+      pronunciation_on: pronunciationOn,
+      voice_type: voice,
+      speech_rate: speechRate,
+      auto_read: autoRead,
+    });
+    if (res.success) {
+      showToast('发音设置已保存', 'success');
+    } else {
+      showToast(res.error || '保存失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
+}
+
+// ===== Daily Targets =====
+async function saveDailyTargets() {
+  var newTarget = parseInt(document.getElementById('dailyNewTarget').value) || 30;
+  var reviewTarget = parseInt(document.getElementById('dailyReviewTarget').value) || 50;
+
+  try {
+    var res = await VOCAB_API.post('/api/settings/', {
+      daily_new_target: newTarget,
+      daily_review_target: reviewTarget,
+    });
+    if (res.success) {
+      showToast('每日目标已更新', 'success');
+    } else {
+      showToast(res.error || '保存失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
+}
+
+// ===== Backup / Restore =====
+function backupData() {
+  window.location.href = '/api/backup/';
+  showToast('正在下载备份文件...', 'success');
+}
+
+async function restoreData(input) {
+  var file = input.files[0];
+  if (!file) return;
+
+  try {
+    var text = await file.text();
+    var data = JSON.parse(text);
+
+    var res = await VOCAB_API.post('/api/restore/', data);
+    if (res.success) {
+      showToast('数据恢复成功！', 'success');
+      setTimeout(function () { window.location.reload(); }, 1000);
+    } else {
+      showToast(res.error || '恢复失败，请检查文件格式', 'error');
+    }
+  } catch (e) {
+    showToast('文件读取失败，请检查文件格式', 'error');
+  }
+}
+
+// ===== 小助手对话记录 =====
+async function clearAssistantHistory() {
+  if (!confirm('确定要清空小助手的全部聊天记录吗？\n\n此操作将删除背诵 / 专注 / 复习中小助手的全部对话历史。')) {
+    return;
+  }
+  try {
+    var res = await VOCAB_API.del('/api/assistant/');
+    if (res.success) {
+      showToast('对话记录已清空', 'success');
+    } else {
+      showToast(res.error || '清空失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
+}
+
+// ===== Reset =====
+async function doResetConfirm() {
+  if (!confirm('确定要重置所有学习进度吗？\n\n此操作将清空所有学习进度和打卡记录。单词数据会被保留，但学习进度不可恢复。\n\n建议先备份数据。')) {
+    return;
+  }
+
+  try {
+    var res = await VOCAB_API.post('/api/progress/reset/', { scope: 'all' });
+    if (res.success) {
+      showToast(res.message || '进度已重置', 'success');
+      setTimeout(function () { window.location.reload(); }, 1000);
+    } else {
+      showToast(res.error || '重置失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
+}
+
+// ===== AI 模型管理 =====
+// 模型服务商预设与「添加 / 编辑模型（API 填写）」窗口已抽为全局独立窗口（static/js/ai_model_modal.js），
+// 本页只负责模型列表的展示、启停、删除与小助手模型选择。
+var aiModels = [];
+
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function visionTag(m) {
+  return m.vision !== false
+    ? '<span class="ai-vision-tag">视觉</span>'
+    : '<span class="ai-vision-tag ai-vision-no">不支持图片（文本模式）</span>';
+}
+function maskKey(key) {
+  if (!key) return '未配置';
+  if (key.length <= 8) return '****';
+  return key.slice(0, 3) + '****' + key.slice(-4);
+}
+
+function loadAIModels() {
+  return VOCAB_API.get('/api/ai-models/').then(function (res) {
+    aiModels = (res && res.models) || [];
+    renderModelList();
+    loadAssistantModel();
+    return aiModels;
+  }).catch(function () {
+    aiModels = [];
+    renderModelList();
+    return aiModels;
+  });
+}
+
+// 全局 API 填写窗口保存成功后刷新本页模型列表
+window.aiModelModalOnSaved = loadAIModels;
+
+// ===== 小助手模型 =====
+function loadAssistantModel() {
+  return VOCAB_API.get('/api/assistant/model/').then(function (res) {
+    var sel = document.getElementById('assistantModelSelect');
+    if (!sel) return;
+    var opts = '<option value="">自动（使用第一个启用的模型）</option>';
+    aiModels.forEach(function (m) {
+      var name = m.display_name || m.model_id;
+      opts += '<option value="' + m.id + '"' + (m.enabled ? '' : ' disabled') + '>'
+        + name + (m.enabled ? '' : '（已禁用）') + '</option>';
+    });
+    sel.innerHTML = opts;
+    sel.value = res.assistant_model_id ? String(res.assistant_model_id) : '';
+  }).catch(function () {});
+}
+
+function saveAssistantModel(val) {
+  VOCAB_API.post('/api/assistant/model/', { model_id: val || null }).then(function (res) {
+    if (res.success) showToast('小助手模型已更新', 'success');
+    else showToast(res.error || '保存失败', 'error');
+  }).catch(function () { showToast('请求失败', 'error'); });
+}
+
+function renderModelList() {
+  var list = document.getElementById('modelList');
+  document.getElementById('modelCount').textContent = aiModels.length;
+  if (aiModels.length === 0) {
+    list.innerHTML = '<div class="text-secondary text-sm" style="text-align:center; padding: 28px;">暂无模型<br>点击右上角「添加模型」，选择服务商并填写 API 密钥。配置保存后，AI 单词导入与速记功能会自动使用已启用的模型。</div>';
+    return;
+  }
+  list.innerHTML = aiModels.map(function (m) {
+    var p = aiProviderInfo(m.provider);
+    return '<div class="card" style="padding: 12px;">' +
+      '<div class="flex justify-between items-center">' +
+        '<div style="min-width: 0;">' +
+          '<strong>' + escapeHtml(m.display_name || m.model_id) + '</strong> ' + visionTag(m) +
+          '<div class="text-sm text-secondary" style="margin-top: 2px;">' + escapeHtml(p.name) + ' · ' + escapeHtml(m.model_id) + ' · ' + maskKey(m.api_key) + ' · ' + escapeHtml(m.context || '128K') + '</div>' +
+        '</div>' +
+        '<div class="flex items-center gap-2">' +
+          '<span class="text-sm" style="color: ' + (m.enabled ? 'var(--c-green)' : 'var(--c-text-3)') + ';">' + (m.enabled ? '已启用' : '已禁用') + '</span>' +
+          '<label class="switch"><input type="checkbox" ' + (m.enabled ? 'checked' : '') + ' onchange="toggleAIModel(' + m.id + ')"><span class="slider"></span></label>' +
+          '<button class="btn btn-sm btn-secondary" onclick="editAIModel(' + m.id + ')" title="编辑模型"><i class="ph ph-pencil-simple"></i></button>' +
+          '<button class="btn btn-sm btn-danger" onclick="deleteAIModel(' + m.id + ')" title="删除模型"><i class="ph ph-trash"></i></button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function toggleAIModel(id) {
+  var m = aiModels.find(function (x) { return x.id === id; });
+  if (!m) return;
+  var next = !m.enabled;
+  VOCAB_API.post('/api/ai-models/', { id: id, enabled: next }).then(function (res) {
+    if (res && res.success) {
+      m.enabled = next;
+      renderModelList();
+      showToast(next ? '模型已启用' : '模型已禁用', 'success');
+    } else {
+      showToast((res && res.error) || '操作失败', 'error');
+    }
+  }).catch(function (e) {
+    showToast((e && e.error) || '操作失败', 'error');
+  });
+}
+
+function deleteAIModel(id) {
+  var m = aiModels.find(function (x) { return x.id === id; });
+  if (!m) return;
+  if (!confirm('确定删除模型「' + (m.display_name || m.model_id) + '」吗？\n删除后需重新配置才能使用。')) return;
+  VOCAB_API.del('/api/ai-models/', { id: id }).then(function (res) {
+    if (res && res.success) {
+      aiModels = aiModels.filter(function (x) { return x.id !== id; });
+      renderModelList();
+      showToast('模型已删除', 'success');
+    } else {
+      showToast((res && res.error) || '删除失败', 'error');
+    }
+  }).catch(function (e) {
+    showToast((e && e.error) || '删除失败', 'error');
+  });
+}
+
+function editAIModel(id) {
+  var m = aiModels.find(function (x) { return x.id === id; });
+  if (!m) return;
+  openAddModel(m);
+}
+
+</script>
+{% endblock %}

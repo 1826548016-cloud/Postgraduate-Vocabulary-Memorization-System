@@ -1,0 +1,138 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}考研单词背诵系统{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/fill/style.css">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-logo">
+        <i class="ph ph-book-open text-accent"></i> 考研单词
+      </div>
+      <nav class="sidebar-nav" id="sidebarNav">
+        <a href="{% url 'words:dashboard' %}" data-nav="dashboard">
+          <i class="ph ph-chart-bar"></i> <span>仪表盘</span>
+        </a>
+        <a href="{% url 'words:word_list' %}" data-nav="words">
+          <i class="ph ph-books"></i> <span>词库</span>
+        </a>
+        <a href="{% url 'words:learn_start' %}" data-nav="learn">
+          <i class="ph ph-target"></i> <span>背诵</span>
+        </a>
+        <a href="{% url 'words:review_session' %}" data-nav="review">
+          <i class="ph ph-arrows-clockwise"></i> <span>复习</span>
+        </a>
+        <a href="{% url 'words:weak_words' %}" data-nav="weak">
+          <i class="ph ph-warning-circle"></i> <span>薄弱词</span>
+        </a>
+        <a href="{% url 'words:statistics' %}" data-nav="stats">
+          <i class="ph ph-trend-up"></i> <span>统计</span>
+        </a>
+        <a href="{% url 'words:study_plan' %}" data-nav="plan">
+          <i class="ph ph-calendar-blank"></i> <span>计划</span>
+        </a>
+        <a href="{% url 'words:favorites_list' %}" data-nav="favorites">
+          <i class="ph ph-star"></i> <span>收藏</span>
+        </a>
+        <a href="{% url 'words:focus_mode' %}" data-nav="focus">
+          <i class="ph ph-eye"></i> <span>专注模式</span>
+        </a>
+        <a href="{% url 'words:exam' %}" data-nav="exam">
+          <i class="ph ph-note-pencil"></i> <span>模拟考试</span>
+        </a>
+        <a href="{% url 'words:settings_page' %}" data-nav="settings">
+          <i class="ph ph-gear"></i> <span>设置</span>
+        </a>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <div class="top-bar">
+        <div class="top-bar-title">{% block page_title %}考研单词背诵系统{% endblock %}</div>
+        <div class="top-bar-actions">
+          <button id="themeToggle" class="btn btn-secondary btn-sm" onclick="toggleTheme()" title="切换主题">
+            <i id="themeIcon" class="ph ph-moon"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="page-content">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+
+  <!-- AI 模型配置独立窗口（API 填写，全局可用） -->
+  {% include 'partials/ai_model_modal.html' %}
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <button id="mobileNavToggle" class="btn btn-secondary" style="display:none;position:fixed;bottom:16px;right:16px;z-index:60;border-radius:50%;width:48px;height:48px;padding:0;font-size:1.4rem;" onclick="toggleMobileNav()"><i class="ph ph-list"></i></button>
+
+  <script src="{% static 'js/tts.js' %}"></script>
+  <script src="{% static 'js/app.js' %}"></script>
+  <script src="{% static 'js/ai_model_modal.js' %}"></script>
+  {% block extra_scripts %}{% endblock %}
+
+  <script>
+  // Theme init — restore from localStorage
+  (function() {
+    var saved = localStorage.getItem('vocab-theme');
+    var icon = document.getElementById('themeIcon');
+    if (saved === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      icon.className = 'ph ph-sun';
+    } else {
+      document.documentElement.setAttribute('data-theme', 'light');
+      icon.className = 'ph ph-moon';
+    }
+  })();
+
+  function toggleTheme() {
+    var html = document.documentElement;
+    var icon = document.getElementById('themeIcon');
+    var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    localStorage.setItem('vocab-theme', next);
+    icon.className = next === 'dark' ? 'ph ph-sun' : 'ph ph-moon';
+  }
+
+  // Sidebar active state
+  (function() {
+    var navEls = document.querySelectorAll('.sidebar-nav a');
+    var path = location.pathname;
+    navEls.forEach(function(a) { a.classList.remove('active'); });
+    for (var i = navEls.length - 1; i >= 0; i--) {
+      if (path === navEls[i].getAttribute('href')) {
+        navEls[i].classList.add('active'); return;
+      }
+    }
+    if (path === '/') navEls[0].classList.add('active');
+  })();
+
+  // Mobile nav
+  function toggleMobileNav() {
+    document.getElementById('sidebar').classList.toggle('show');
+  }
+
+  (function checkMobile() {
+    var t = document.getElementById('mobileNavToggle');
+    t.style.display = window.innerWidth <= 768 ? 'flex' : 'none';
+  })();
+  window.addEventListener('resize', function() {
+    var t = document.getElementById('mobileNavToggle');
+    t.style.display = window.innerWidth <= 768 ? 'flex' : 'none';
+  });
+  </script>
+</body>
+</html>

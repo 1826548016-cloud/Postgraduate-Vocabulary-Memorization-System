@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}
+  {% if plan %}编辑计划 - 考研单词背诵系统{% else %}创建计划 - 考研单词背诵系统{% endif %}
+{% endblock %}
+{% block page_title %}
+  {% if plan %}编辑学习计划{% else %}创建学习计划{% endif %}
+{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<div class="card" style="margin-bottom: 24px;">
+  <div class="form-group">
+    <label class="form-label">计划名称</label>
+    <input type="text" class="form-input" id="planName" placeholder="例如：暑假冲刺计划" value="{{ plan.name|default:'' }}">
+  </div>
+
+  <div class="card-grid">
+    <div class="form-group">
+      <label class="form-label">每日新词数</label>
+      <input type="number" class="form-input" id="dailyNew" value="{{ plan.daily_new_words|default:30 }}" min="1" max="200">
+      <div class="form-help">建议每天 20-50 个新词</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">每日复习量</label>
+      <input type="number" class="form-input" id="dailyReview" value="{{ plan.daily_review_count|default:50 }}" min="1" max="300">
+      <div class="form-help">建议每天 40-100 个复习词</div>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label class="form-label">目标完成日期（可选）</label>
+    <input type="date" class="form-input" id="targetDate" value="{{ plan.target_date|date:'Y-m-d'|default:'' }}">
+  </div>
+
+  <div class="form-group">
+    <label class="form-label">单元范围（可选，留空则包含全部单词）</label>
+    <div style="max-height: 240px; overflow-y: auto; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+      {% for unit in units %}
+      <label class="card" style="padding: 8px 12px; margin-bottom: 4px;">
+        <div class="flex items-center gap-2">
+          <input type="checkbox" class="unit-cb" value="{{ unit.number }}"
+            {% if plan %}
+              {% for n in plan.get_unit_range %}
+                {% if n == unit.number %}checked{% endif %}
+              {% endfor %}
+            {% endif %}
+          >
+          <span>List {{ unit.number }} - {{ unit.name }}</span>
+          <span class="text-sm text-secondary" style="margin-left: auto;">{{ unit.word_count }}词</span>
+        </div>
+      </label>
+      {% empty %}
+      <p class="text-secondary text-sm">暂无单元数据</p>
+      {% endfor %}
+    </div>
+    <div class="form-help">选择要学习的单元，不选则表示全部单词</div>
+  </div>
+
+  <div class="flex gap-4 justify-between" style="margin-top: 24px;">
+    <a href="{% url 'words:study_plan' %}" class="btn btn-secondary">取消</a>
+    <button class="btn btn-primary" id="submitBtn" onclick="submitPlan()">
+      {% if plan %}保存修改{% else %}创建计划{% endif %}
+    </button>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var editPlanId = {% if plan %}{{ plan.id }}{% else %}null{% endif %};
+
+async function submitPlan() {
+  var name = document.getElementById('planName').value.trim();
+  var dailyNew = parseInt(document.getElementById('dailyNew').value) || 30;
+  var dailyReview = parseInt(document.getElementById('dailyReview').value) || 50;
+  var targetDate = document.getElementById('targetDate').value;
+
+  if (!name) {
+    showToast('请输入计划名称', 'error');
+    return;
+  }
+
+  var unitRange = [];
+  document.querySelectorAll('.unit-cb:checked').forEach(function (cb) {
+    unitRange.push(parseInt(cb.value));
+  });
+
+  var data = {
+    name: name,
+    daily_new_words: dailyNew,
+    daily_review_count: dailyReview,
+    target_date: targetDate || null,
+    unit_range: unitRange,
+  };
+
+  try {
+    var res;
+    if (editPlanId) {
+      res = await VOCAB_API.post('/api/plan/update/' + editPlanId + '/', data);
+    } else {
+      res = await VOCAB_API.post('/api/plan/create/', data);
+    }
+
+    if (res.success) {
+      showToast(editPlanId ? '计划已更新' : '计划创建成功', 'success');
+      setTimeout(function () { window.location.href = '{% url "words:study_plan" %}'; }, 500);
+    } else {
+      showToast(res.error || '操作失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
+}
+</script>
+{% endblock %}

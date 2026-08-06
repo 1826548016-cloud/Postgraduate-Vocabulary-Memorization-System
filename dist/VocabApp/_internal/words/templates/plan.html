@@ -1,0 +1,197 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}学习计划 - 考研单词背诵系统{% endblock %}
+{% block page_title %}学习计划{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<!-- Create Plan Button -->
+<div class="flex justify-between items-center" style="margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+  <h2 style="margin: 0; font-size: var(--font-xl);">我的学习计划</h2>
+  <a href="{% url 'words:plan_create' %}" class="btn btn-primary">+ 创建新计划</a>
+</div>
+
+{% if plan_today %}
+<!-- 今日学习中心 -->
+<div class="card plan-today-card" style="margin-bottom: 16px;">
+  <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+    <div>
+      <span class="card-header" style="margin: 0;">📅 {{ plan_today.plan_name }}</span>
+      {% if plan_today.days_left is not None %}
+        <span class="badge badge-review" style="margin-left: 8px;">距目标 {{ plan_today.days_left }} 天</span>
+      {% endif %}
+    </div>
+    <div class="text-sm text-secondary">
+      整体进度：{{ plan_today.mastered }} / {{ plan_today.total_words }} 词（{{ plan_today.overall_percent }}%）
+    </div>
+  </div>
+
+  <!-- 整体进度条 -->
+  <div class="progress-bar" style="height: 8px; margin-bottom: 20px;">
+    <div class="progress-bar-fill" style="width: {{ plan_today.overall_percent }}%;"></div>
+  </div>
+
+  <!-- 今日双卡片 -->
+  <div class="card-grid" style="margin-bottom: 0;">
+    <div class="stat-card today-task-card">
+      <div class="stat-label">🆕 今日新词</div>
+      <div class="stat-value" style="font-size: var(--font-xl);">
+        {{ plan_today.today_new_done }} <span style="font-size: var(--fs-base); color: var(--c-text-3); font-weight: 400;">/ {{ plan_today.daily_new_target }}</span>
+      </div>
+      <div class="progress-bar" style="margin: 8px 0;">
+        <div class="progress-bar-fill" style="width: {% widthratio plan_today.today_new_done plan_today.daily_new_target 100 %}%;"></div>
+      </div>
+      <a href="{% url 'words:learn_start' %}" class="btn btn-primary btn-sm" style="width: 100%;">继续背新词 →</a>
+    </div>
+    <div class="stat-card today-task-card">
+      <div class="stat-label">🔄 今日复习</div>
+      <div class="stat-value" style="font-size: var(--font-xl);">
+        {{ plan_today.today_review_done }} <span style="font-size: var(--fs-base); color: var(--c-text-3); font-weight: 400;">/ {{ plan_today.daily_review_target }}</span>
+      </div>
+      <div class="progress-bar" style="margin: 8px 0;">
+        <div class="progress-bar-fill" style="width: {% if plan_today.daily_review_target > 0 %}{% widthratio plan_today.today_review_done plan_today.daily_review_target 100 %}{% else %}0{% endif %}%;"></div>
+      </div>
+      <a href="{% url 'words:review_session' %}" class="btn btn-secondary btn-sm" style="width: 100%;">去复习 →</a>
+    </div>
+  </div>
+
+  <!-- 本周学习日历 -->
+  <div style="margin-top: 20px;">
+    <div class="text-sm" style="font-weight: 600; margin-bottom: 10px;">📌 本周学习</div>
+    <div class="weekly-calendar">
+      {% for day in plan_today.weekly %}
+      <div class="weekday-cell weekday-{{ day.status }}">
+        <div class="weekday-label">{{ day.weekday }}</div>
+        {% if day.status == 'done' %}
+          <div class="weekday-icon">✓</div>
+          <div class="weekday-count">{{ day.total }}词</div>
+        {% elif day.status == 'today' %}
+          <div class="weekday-icon">◐</div>
+          <div class="weekday-count">{{ day.total }}词</div>
+        {% elif day.status == 'missed' %}
+          <div class="weekday-icon">·</div>
+          <div class="weekday-count">未学</div>
+        {% else %}
+          <div class="weekday-icon">—</div>
+          <div class="weekday-count">&nbsp;</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Existing Plans -->
+<div id="planList">
+  {% if plans %}
+    {% for plan in plans %}
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 16px; margin-bottom: 16px;">
+        <div>
+          <div class="card-header" style="margin-bottom: 4px;">
+            {{ plan.name }}
+            {% if plan.is_active %}
+              <span class="badge badge-mastered">当前计划</span>
+            {% endif %}
+          </div>
+          <div class="text-sm text-secondary">创建于 {{ plan.start_date }}</div>
+        </div>
+        <div class="flex gap-2">
+          {% if not plan.is_active %}
+          <button class="btn btn-secondary btn-sm" onclick="activatePlan({{ plan.id }})">启用</button>
+          {% endif %}
+          <a href="{% url 'words:plan_create' %}?plan_id={{ plan.id }}" class="btn btn-secondary btn-sm">编辑</a>
+          <button class="btn btn-danger btn-sm" onclick="deletePlan({{ plan.id }}, '{{ plan.name }}')">删除</button>
+        </div>
+      </div>
+
+      <div class="card-grid" style="margin-bottom: 0;">
+        <div class="stat-card">
+          <div class="stat-label">每日新词</div>
+          <div class="stat-value" style="font-size: var(--font-xl);">{{ plan.daily_new_words }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">每日复习</div>
+          <div class="stat-value" style="font-size: var(--font-xl);">{{ plan.daily_review_count }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">剩余单词</div>
+          <div class="stat-value" style="font-size: var(--font-xl);">{{ plan.remaining_words }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">预计完成天数</div>
+          <div class="stat-value" style="font-size: var(--font-xl);">{{ plan.estimated_days }}</div>
+        </div>
+      </div>
+
+      {% if plan.target_date %}
+      <div class="text-sm text-secondary" style="margin-top: 16px;">
+        目标完成日期：{{ plan.target_date }}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="card text-center" style="padding: 48px 24px;">
+      <div class="text-secondary" style="font-size: var(--font-lg); margin-bottom: 16px;">
+        还没有学习计划
+      </div>
+      <p class="text-secondary" style="margin-bottom: 24px;">
+        创建学习计划，设定每日新词和复习目标，让学习更有规划！
+      </p>
+      <a href="{% url 'words:plan_create' %}" class="btn btn-primary btn-lg">创建我的第一个计划</a>
+    </div>
+  {% endif %}
+</div>
+
+<!-- Plan Tips -->
+<div class="card" style="margin-top: 24px;">
+  <div class="card-header">学习建议</div>
+  <ul style="margin: 0; padding-left: 20px; color: var(--text-secondary); line-height: 2;">
+    <li>每天坚持学习比一次性突击更有效</li>
+    <li>新词 + 复习搭配进行效果最好</li>
+    <li>定期复习已学单词，巩固记忆</li>
+    <li>建议每日新词不超过 50 个，保证每个词都有足够时间消化</li>
+    <li>定期查看统计报表，了解自己的薄弱环节</li>
+  </ul>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+async function activatePlan(planId) {
+  try {
+    var res = await VOCAB_API.post('/api/plan/update/' + planId + '/', { is_active: true });
+    if (res.success) {
+      showToast('计划已启用', 'success');
+      setTimeout(function () { window.location.reload(); }, 500);
+    } else {
+      showToast(res.error || '操作失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
+}
+
+async function deletePlan(planId, planName) {
+  if (!confirm('确定要删除计划"' + planName + '"吗？\n\n此操作不可恢复。')) {
+    return;
+  }
+
+  try {
+    var res = await VOCAB_API.del('/api/plan/delete/' + planId + '/');
+    if (res.success) {
+      showToast(res.message, 'success');
+      setTimeout(function () { window.location.reload(); }, 500);
+    } else {
+      showToast(res.error || '删除失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
+}
+</script>
+{% endblock %}

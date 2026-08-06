@@ -1,0 +1,139 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}收藏列表 - 考研单词背诵系统{% endblock %}
+{% block page_title %}收藏列表{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<div class="flex justify-between items-center" style="margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+  <h2 style="margin: 0; font-size: var(--fs-xl); display: flex; align-items: center; gap: 8px;">
+    <i class="ph ph-star" style="color: var(--c-amber);"></i> 我的收藏
+    <span class="text-sm text-secondary" style="font-weight: 400;">共 {{ favorites|length }} 个</span>
+  </h2>
+  <div class="flex gap-2">
+    <a href="{% url 'words:learn_session' %}?mode=random&units=" class="btn btn-primary btn-sm">从收藏开始背诵</a>
+  </div>
+</div>
+
+{% if favorites %}
+<div class="card-grid">
+  {% for fav in favorites %}
+  <div class="card" id="fav-card-{{ fav.word.id }}">
+    <div class="flex justify-between items-start" style="margin-bottom: 12px;">
+      <a href="{% url 'words:word_detail' fav.word.id %}" style="text-decoration: none; color: var(--text);">
+        <div style="font-size: var(--font-xl); font-weight: 700;">{{ fav.word.word }}</div>
+      </a>
+      <button class="btn btn-secondary btn-sm" onclick="toggleFavorite({{ fav.word.id }}, this)" title="取消收藏">
+        <i class="ph ph-star-fill" style="color: var(--c-amber);"></i>
+      </button>
+    </div>
+
+    {% if fav.word.phonetic_us %}
+    <div class="text-secondary" style="margin-bottom: 8px;">
+      {{ fav.word.phonetic_us }}
+      <button class="btn btn-secondary btn-sm" onclick="speak('{{ fav.word.word }}')" title="发音" style="margin-left: 4px; padding: 2px 6px;"><i class="ph ph-speaker-high"></i></button>
+    </div>
+    {% endif %}
+
+    <div style="margin-bottom: 8px;">
+      <span class="badge badge-mastered" style="margin-right: 4px;">{{ fav.word.get_category_display|default:fav.word.category }}</span>
+      {% if fav.word.pos %}
+      <span class="text-sm text-secondary">{{ fav.word.pos }}</span>
+      {% endif %}
+    </div>
+
+    <div class="text-secondary" style="margin-bottom: 12px;">
+      {{ fav.word.meanings_display|truncatechars:60 }}
+    </div>
+
+    {% if fav.word.example_en %}
+    <div class="text-sm text-secondary" style="font-style: italic; margin-bottom: 4px;">
+      {{ fav.word.example_en|truncatechars:100 }}
+    </div>
+    {% if fav.word.example_zh %}
+    <div class="text-sm text-secondary">
+      {{ fav.word.example_zh|truncatechars:80 }}
+    </div>
+    {% endif %}
+    {% endif %}
+
+    <!-- Progress -->
+    {% with progress=fav.word.progress %}
+    {% if progress %}
+    <div style="margin-top: 12px;">
+      <div class="flex justify-between items-center" style="margin-bottom: 4px;">
+        <span class="text-sm text-secondary">
+          {% if progress.status == 'mastered' %}<span style="color: var(--c-green);">已掌握</span>{% else %}<span style="color: var(--c-amber);">学习中</span>{% endif %}
+        </span>
+        <span class="text-sm text-secondary">复习 {{ progress.review_count }} 次</span>
+      </div>
+      <div class="progress-bar">
+        {% if progress.status == 'mastered' %}
+        <div class="progress-bar-fill" style="width: 100%; background: var(--c-green);"></div>
+        {% else %}
+        <div class="progress-bar-fill" style="width: 50%; background: var(--c-amber);"></div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <div class="text-sm text-secondary" style="margin-top: 8px;">
+      收藏于 {{ fav.created_at|date:"Y-m-d H:i" }}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card text-center" style="padding: 48px 24px;">
+  <div style="font-size: 3rem; margin-bottom: 16px;"><i class="ph ph-star" style="color: var(--c-amber);"></i></div>
+  <div class="text-secondary" style="font-size: var(--fs-lg); margin-bottom: 16px;">
+    还没有收藏的单词
+  </div>
+  <p class="text-secondary" style="margin-bottom: 24px;">
+    在词库浏览或单词详情页中，点击收藏按钮即可收藏单词
+  </p>
+  <a href="{% url 'words:word_list' %}" class="btn btn-primary">去词库看看</a>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ===== Toggle Favorite =====
+async function toggleFavorite(wordId, btn) {
+  try {
+    var res = await VOCAB_API.post('/api/favorite/' + wordId + '/');
+    if (res.success && !res.is_favorite) {
+      // Removed from favorites
+      var card = document.getElementById('fav-card-' + wordId);
+      if (card) {
+        card.style.opacity = '0';
+        card.style.transform = 'scale(0.95)';
+        card.style.transition = 'all 0.3s ease';
+        setTimeout(function () {
+          card.remove();
+          // If no more cards, reload to show empty state
+          var remaining = document.querySelectorAll('[id^="fav-card-"]');
+          if (remaining.length === 0) {
+            window.location.reload();
+          }
+          // Update count
+          var countEl = document.querySelector('h2 span');
+          var newCount = remaining.length;
+          if (countEl) countEl.textContent = '共 ' + newCount + ' 个';
+        }, 300);
+      }
+      showToast('已取消收藏', 'success');
+    }
+  } catch (e) {
+    showToast('操作失败', 'error');
+  }
+}
+
+// ===== TTS =====
+function speak(text) { window.VOCAB_SPEAK(text); }
+</script>
+{% endblock %}

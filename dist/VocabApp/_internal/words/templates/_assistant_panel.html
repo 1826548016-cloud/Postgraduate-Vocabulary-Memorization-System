@@ -1,0 +1,276 @@
+<style>
+  /* ===== 小助手（背诵/专注/复习通用）===== */
+
+  /* 遮罩：点击收起 */
+  .assistant-backdrop {
+    position: fixed; inset: 0; z-index: 89;
+    background: rgba(20, 24, 18, .28);
+    opacity: 0; visibility: hidden;
+    transition: opacity .22s ease, visibility 0s linear .22s;
+  }
+  .assistant-backdrop.open {
+    opacity: 1; visibility: visible;
+    transition: opacity .22s ease, visibility 0s;
+  }
+
+  /* 浮动按钮：统一圆形，桌面右下角，移动端左下角避开菜单按钮 */
+  .assistant-fab {
+    position: fixed; bottom: 20px; right: 20px; z-index: 95;
+    width: 56px; height: 56px; padding: 0; border: none; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    background: linear-gradient(135deg, var(--c-green), #719375);
+    color: #fff; font-size: 1.4rem;
+    box-shadow: var(--shadow-lg);
+    transition: transform .15s ease, filter .15s ease;
+  }
+  .assistant-fab:hover { filter: brightness(1.08); transform: translateY(-2px); }
+  .assistant-fab-tip {
+    position: absolute; right: calc(100% + 10px); top: 50%;
+    transform: translateY(-50%) translateX(4px);
+    background: #2b2b26; color: #fff; font-size: 12px; white-space: nowrap;
+    padding: 4px 10px; border-radius: 8px; opacity: 0; pointer-events: none;
+    transition: opacity .15s ease, transform .15s ease;
+  }
+  .assistant-fab:hover .assistant-fab-tip,
+  .assistant-fab:focus-visible .assistant-fab-tip {
+    opacity: 1; transform: translateY(-50%) translateX(0);
+  }
+
+  /* 聊天面板：桌面右侧抽屉 / 移动端底部抽屉 */
+  .assistant-panel {
+    position: fixed; z-index: 90;
+    display: flex; flex-direction: column;
+    background: var(--c-surface); border: 1px solid var(--c-border);
+    box-shadow: var(--shadow-lg); overflow: hidden;
+  }
+  @media (min-width: 769px) {
+    .assistant-panel {
+      top: 16px; bottom: 16px; right: 16px;
+      width: 380px; max-width: calc(100vw - 32px);
+      border-radius: 16px;
+      transform: translateX(calc(100% + 28px));
+      visibility: hidden;
+      transition: transform .25s ease, visibility 0s linear .25s;
+    }
+  }
+  @media (max-width: 768px) {
+    .assistant-fab { bottom: 16px; right: auto; left: 16px; }
+    .assistant-fab-tip { display: none; }
+    .assistant-panel {
+      top: auto; bottom: 0; left: 0; right: 0;
+      width: 100%; max-width: 100%;
+      height: min(76dvh, 560px);
+      border-radius: 18px 18px 0 0;
+      transform: translateY(102%);
+      visibility: hidden;
+      transition: transform .25s ease, visibility 0s linear .25s;
+    }
+  }
+  .assistant-panel.open {
+    visibility: visible;
+    transform: translateX(0) translateY(0);
+    transition: transform .25s ease, visibility 0s;
+  }
+
+  /* 头部 */
+  .assistant-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 12px 14px; border-bottom: 1px solid var(--c-border-light);
+    background: var(--c-surface-2);
+  }
+  .assistant-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .assistant-avatar {
+    width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, var(--c-green), #719375);
+    color: #fff; font-size: 1.15rem;
+  }
+  .assistant-header-info { min-width: 0; }
+  .assistant-title { font-weight: 700; font-size: var(--fs-base); }
+  .assistant-word-capsule {
+    display: inline-flex; align-items: center; gap: 4px; margin-top: 2px;
+    max-width: 240px; padding: 2px 8px; border-radius: 999px;
+    background: var(--c-green-bg); color: var(--c-green);
+    font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .assistant-word-capsule.hidden { display: none; }
+  .assistant-header-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .assistant-header-actions .btn { min-width: auto; padding: 6px 8px; }
+
+  /* 错误横幅 */
+  .assistant-error {
+    display: flex; align-items: flex-start; gap: 6px;
+    margin: 10px 12px 0; padding: 8px 10px; border-radius: 10px;
+    background: var(--c-red-bg); color: var(--c-red);
+    font-size: var(--fs-sm); line-height: 1.5; cursor: pointer;
+  }
+  .assistant-error.hidden { display: none; }
+
+  /* 消息区 */
+  .assistant-body {
+    flex: 1; overflow-y: auto; padding: 14px;
+    display: flex; flex-direction: column; gap: 12px;
+    background: var(--c-surface);
+  }
+  .assistant-date-divider {
+    align-self: center; font-size: 11px; color: var(--c-text-3);
+    background: var(--c-surface-2); border: 1px solid var(--c-border-light);
+    padding: 2px 10px; border-radius: 999px;
+  }
+  .assistant-msg { display: flex; align-items: flex-start; gap: 8px; max-width: 100%; }
+  .assistant-msg.user { flex-direction: row-reverse; }
+  .assistant-avatar-sm {
+    width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 1rem;
+  }
+  .assistant-avatar-sm.ai { background: linear-gradient(135deg, var(--c-green), #719375); color: #fff; }
+  .assistant-avatar-sm.user { background: var(--c-surface-2); color: var(--c-text-2); border: 1px solid var(--c-border); }
+  .assistant-bubble {
+    max-width: 78%; padding: 9px 12px; border-radius: 14px;
+    font-size: var(--fs-sm); line-height: 1.65; word-break: break-word;
+    border-bottom-left-radius: 4px;
+  }
+  .assistant-msg.user .assistant-bubble {
+    background: var(--c-green); color: #fff; white-space: pre-wrap;
+    border-bottom-left-radius: 14px; border-bottom-right-radius: 4px;
+  }
+  .assistant-msg.user .assistant-bubble .assistant-msg-time { color: rgba(255,255,255,.75); }
+  .assistant-msg.ai .assistant-bubble { background: var(--c-surface-2); border: 1px solid var(--c-border-light); white-space: normal; }
+  .assistant-msg-time { display: block; margin-top: 4px; font-size: 10px; opacity: .65; }
+  .assistant-msg.user .assistant-msg-time { text-align: right; }
+
+  /* 正在思考 */
+  .assistant-thinking { display: inline-flex; align-items: center; gap: 6px; }
+  .assistant-thinking .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--c-text-3);
+    animation: assistantBlink 1.2s infinite ease-in-out;
+  }
+  .assistant-thinking .dot:nth-child(2) { animation-delay: .18s; }
+  .assistant-thinking .dot:nth-child(3) { animation-delay: .36s; }
+  @keyframes assistantBlink {
+    0%, 60%, 100% { opacity: .25; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-2px); }
+  }
+  .assistant-thinking-hint { font-size: 11px; color: var(--c-text-3); margin-left: 6px; }
+
+  /* AI Markdown 排版 */
+  .assistant-bubble h1, .assistant-bubble h2, .assistant-bubble h3, .assistant-bubble h4 {
+    margin: 8px 0 4px; font-weight: 700; line-height: 1.4;
+  }
+  .assistant-bubble h1 { font-size: 1.05rem; }
+  .assistant-bubble h2 { font-size: 1rem; }
+  .assistant-bubble h3, .assistant-bubble h4 { font-size: .96rem; }
+  .assistant-bubble p { margin: 4px 0; }
+  .assistant-bubble ul, .assistant-bubble ol { margin: 4px 0; padding-left: 18px; }
+  .assistant-bubble li { margin: 2px 0; }
+  .assistant-bubble hr { border: none; border-top: 1px solid var(--c-border); margin: 8px 0; }
+  .assistant-bubble code {
+    background: rgba(127,127,127,.14); padding: 1px 4px; border-radius: 4px;
+    font-size: .9em; font-family: Consolas, Monaco, monospace;
+  }
+  .assistant-code-block {
+    margin: 6px 0; border-radius: 8px; overflow: hidden;
+    background: rgba(127,127,127,.12);
+  }
+  .assistant-code-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 10px; font-size: 11px; color: var(--c-text-3);
+    background: rgba(127,127,127,.14);
+  }
+  .assistant-copy-btn {
+    border: none; background: transparent; color: var(--c-text-2);
+    cursor: pointer; font-size: 11px; padding: 2px 6px; border-radius: 6px;
+  }
+  .assistant-copy-btn:hover { background: rgba(127,127,127,.18); color: var(--c-text); }
+  .assistant-code-block pre { padding: 8px 10px; overflow-x: auto; margin: 0; white-space: pre; }
+  .assistant-code-block pre code { background: none; padding: 0; }
+  .assistant-bubble blockquote {
+    border-left: 3px solid var(--c-green); background: var(--c-green-bg);
+    margin: 6px 0; padding: 4px 10px; border-radius: 0 8px 8px 0;
+  }
+  .assistant-table-wrap { overflow-x: auto; margin: 6px 0; }
+  .assistant-bubble table { border-collapse: collapse; width: 100%; font-size: .95em; }
+  .assistant-bubble th, .assistant-bubble td {
+    border: 1px solid var(--c-border); padding: 4px 8px; text-align: left; white-space: nowrap;
+  }
+  .assistant-bubble a { color: var(--c-green); text-decoration: underline; word-break: break-all; }
+
+  /* 空状态 */
+  .assistant-empty {
+    color: var(--c-text-3); text-align: center; font-size: var(--fs-sm);
+    margin: auto; line-height: 1.9; padding: 0 8px;
+  }
+  .assistant-empty i { display: block; font-size: 2rem; margin-bottom: 6px; color: var(--c-green); }
+
+  /* 底部：快捷提问 + 输入 */
+  .assistant-footer {
+    border-top: 1px solid var(--c-border-light);
+    background: var(--c-surface-2); padding: 10px 12px 12px;
+  }
+  .assistant-chips {
+    display: flex; gap: 6px; overflow-x: auto;
+    padding-bottom: 8px; margin-bottom: 8px; scrollbar-width: none;
+  }
+  .assistant-chips::-webkit-scrollbar { display: none; }
+  .assistant-chips.hidden { display: none; }
+  .assistant-chip {
+    flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
+    border: 1px solid var(--c-border); background: var(--c-surface);
+    color: var(--c-text-2); font-size: 12px; padding: 5px 10px;
+    border-radius: 999px; cursor: pointer; transition: all .15s ease;
+  }
+  .assistant-chip:hover { border-color: var(--c-green); color: var(--c-green); background: var(--c-green-bg); }
+  .assistant-input-row { display: flex; gap: 8px; align-items: flex-end; }
+  .assistant-input-row textarea { flex: 1; resize: none; min-height: 38px; max-height: 110px; }
+  .assistant-input-hint { margin-top: 6px; font-size: 11px; color: var(--c-text-3); text-align: right; }
+</style>
+
+<!-- 遮罩：点击收起 -->
+<div id="assistantBackdrop" class="assistant-backdrop"></div>
+
+<!-- 小助手聊天面板（背诵/专注/复习共用，对话历史互通） -->
+<div id="assistantPanel" class="assistant-panel">
+  <div class="assistant-header">
+    <div class="assistant-header-left">
+      <div class="assistant-avatar"><i class="ph ph-chat-circle-text"></i></div>
+      <div class="assistant-header-info">
+        <div class="assistant-title">小助手</div>
+        <div class="assistant-word-capsule hidden" id="assistantWordCapsule" title="当前正在查看的单词">
+          <i class="ph ph-book-open"></i> 正在查看：<span id="assistantWordName"></span>
+        </div>
+      </div>
+    </div>
+    <div class="assistant-header-actions">
+      <button id="assistantClearBtn" class="btn btn-ghost btn-sm" title="清空对话记录"><i class="ph ph-trash"></i></button>
+      <button id="assistantCloseBtn" class="btn btn-ghost btn-sm" title="收起 (ESC)"><i class="ph ph-x"></i></button>
+    </div>
+  </div>
+
+  <div id="assistantError" class="assistant-error hidden"><i class="ph ph-warning-circle"></i><span></span></div>
+
+  <div id="assistantBody" class="assistant-body">
+    <div class="assistant-empty"><i class="ph ph-chat-circle-text"></i>你好，我是你的智能助手！<br>单词考法、近义辨析、例句仿写都可以问我。</div>
+  </div>
+
+  <div class="assistant-footer">
+    <div id="assistantChips" class="assistant-chips hidden">
+      <button type="button" class="assistant-chip" data-prompt="请讲解当前单词的考法、常见考点和易错点"><i class="ph ph-lightbulb"></i>考法</button>
+      <button type="button" class="assistant-chip" data-prompt="请辨析当前单词与它相近、易混的单词，说明区别"><i class="ph ph-arrows-clockwise"></i>辨析</button>
+      <button type="button" class="assistant-chip" data-prompt="请列出当前单词的常见搭配和短语，各配一个简短例句"><i class="ph ph-list-bullets"></i>搭配</button>
+      <button type="button" class="assistant-chip" data-prompt="请给我一个记忆当前单词的技巧（拆分/谐音/联想口诀）"><i class="ph ph-lightning"></i>记忆</button>
+      <button type="button" class="assistant-chip" data-prompt="请用当前单词造 3 个贴近考研真题风格的例句，并给出中文翻译"><i class="ph ph-note-pencil"></i>例句</button>
+    </div>
+    <div class="assistant-input-row">
+      <textarea id="assistantInput" class="form-input" rows="1" placeholder="随便问点什么…"></textarea>
+      <button id="assistantSendBtn" class="btn btn-primary" title="发送"><i class="ph ph-paper-plane-tilt"></i></button>
+    </div>
+    <div class="assistant-input-hint">Enter 发送 · Shift+Enter 换行</div>
+  </div>
+</div>
+
+<!-- 浮动按钮 -->
+<button id="assistantFab" class="assistant-fab" title="小助手">
+  <i class="ph ph-chat-circle-text"></i>
+  <span class="assistant-fab-tip">小助手</span>
+</button>
