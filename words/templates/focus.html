@@ -6,6 +6,24 @@
 
 {% block content %}
 {% csrf_token %}
+<style>
+  .focus-progress-slider {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 8px; border-radius: 4px;
+    background: var(--c-border); outline: none; cursor: pointer;
+    margin-top: 8px;
+  }
+  .focus-progress-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--c-green); cursor: pointer;
+    border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.2);
+  }
+  .focus-progress-slider::-moz-range-thumb {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--c-green); cursor: pointer; border: 2px solid #fff;
+  }
+</style>
 
 <div id="focusApp">
   <!-- Setup: choose scope + units + mode -->
@@ -84,6 +102,7 @@
       <div class="progress-bar" style="height: 4px;">
         <div class="progress-bar-fill" id="focusProgress" style="width: 0%;"></div>
       </div>
+      <input type="range" id="focusSlider" class="focus-progress-slider" min="0" max="1" value="0" step="1" title="拖动跳转单词">
     </div>
 
     <!-- Word Card -->
@@ -205,9 +224,12 @@ function focusEnterSession() {
   document.getElementById('focusSetup').classList.add('hidden');
   document.getElementById('focusSession').classList.remove('hidden');
   document.getElementById('focusComplete').classList.add('hidden');
+  var fs = document.getElementById('focusSlider');
+  if (fs) fs.max = Math.max(0, focusWords.length - 1);
   if (sessionCompleted) {
     focusShowComplete();
   } else {
+    if (window.VocabStudyTimer) VocabStudyTimer.start();
     focusRender();
   }
 }
@@ -284,6 +306,8 @@ function focusRender() {
 
   document.getElementById('focusCounter').textContent = (focusIndex + 1) + ' / ' + focusWords.length;
   document.getElementById('focusProgress').style.width = ((focusIndex) / focusWords.length * 100) + '%';
+  var fs = document.getElementById('focusSlider');
+  if (fs && !fs.dataset.dragging) fs.value = focusIndex;
 
   // Auto speak
   if (word.word) {
@@ -299,13 +323,56 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// 按词性分组展示释义（与背诵页一致的 pos-group 样式）
+// 切换词性熟悉/陌生状态（专注模式）
+function toggleFocusUncommonPos(pos, btn) {
+  var word = focusWords[focusIndex];
+  if (!word) return;
+  var uncommon = word.uncommon_pos || [];
+  var action = uncommon.indexOf(pos) === -1 ? 'add' : 'remove';
+  VOCAB_API.post('/api/mark-uncommon-pos/' + word.id + '/', { pos: pos, action: action })
+    .then(function (res) {
+      if (res && res.success) {
+        word.uncommon_pos = res.uncommon_pos;
+        if (btn) {
+          btn.classList.remove('is-familiar', 'is-uncommon');
+          btn.classList.add(action === 'add' ? 'is-uncommon' : 'is-familiar');
+          btn.innerHTML = action === 'add'
+            ? '<i class="ph ph-warning-circle"></i> 陌生'
+            : '<i class="ph ph-check"></i> 熟悉';
+          var group = btn.closest('.pos-group');
+          if (group) group.classList.toggle('pos-uncommon', action === 'add');
+        }
+      }
+    })
+    .catch(function () {
+      if (typeof showToast === 'function') showToast('标记失败', 'error');
+    });
+}
+
+// 词性熟悉/陌生切换按钮事件委托（focusMeaning 容器）
+var focusMeaningEl = document.getElementById('focusMeaning');
+if (focusMeaningEl) {
+  focusMeaningEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('.pos-fam-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    toggleFocusUncommonPos(btn.dataset.pos, btn);
+  });
+}
+
+// 按词性分组展示释义（与背诵页一致的 pos-group 样式，含熟悉/陌生切换）
 function formatFocusMeanings(word) {
   var byPos = (word && word.meanings_by_pos) || {};
   var posKeys = Object.keys(byPos).filter(function (k) { return byPos[k] && byPos[k].length; });
+  var uncommon = word ? (word.uncommon_pos || []) : [];
   if (posKeys.length) {
     return posKeys.map(function (p) {
-      return '<div class="pos-group"><span class="meaning-pos">' + escapeHtml(p) + '</span> ' +
+      var isUncommon = uncommon.indexOf(p) !== -1;
+      var btnClass = isUncommon ? 'pos-fam-btn is-uncommon' : 'pos-fam-btn is-familiar';
+      var btnIcon = isUncommon ? '<i class="ph ph-warning-circle"></i> 陌生' : '<i class="ph ph-check"></i> 熟悉';
+      return '<div class="pos-group' + (isUncommon ? ' pos-uncommon' : '') + '">' +
+        '<span class="meaning-pos">' + escapeHtml(p) + '</span> ' +
+        '<span class="pos-fam-btn ' + btnClass + '" data-pos="' + escapeHtml(p) + '">' + btnIcon + '</span><br>' +
         byPos[p].map(function (m) { return '<span class="meaning-item">' + escapeHtml(m) + '</span>'; }).join(' ') +
       '</div>';
     }).join('');
@@ -379,6 +446,7 @@ function focusPrev() {
 
 // ===== Complete =====
 function focusShowComplete() {
+  if (window.VocabStudyTimer) VocabStudyTimer.stop();
   sessionCompleted = true;
   document.getElementById('focusWord').textContent = '完成！';
   document.getElementById('focusDetails').style.display = 'none';
@@ -399,6 +467,7 @@ function focusShowComplete() {
 
 // ===== Reset =====
 function focusReset() {
+  if (window.VocabStudyTimer) VocabStudyTimer.stop();
   focusClearState();
   document.getElementById('focusSetup').classList.remove('hidden');
   document.getElementById('focusSession').classList.add('hidden');
@@ -482,6 +551,22 @@ if (window.AssistantPanel) {
   AssistantPanel.init({
     getCurrentWord: function () { return focusWords[focusIndex] || null; },
     aiSettingsUrl: "{% url 'words:settings_page' %}#ai-models"
+  });
+}
+
+// ===== 进度条拖动跳转 =====
+var focusSliderEl = document.getElementById('focusSlider');
+if (focusSliderEl) {
+  focusSliderEl.addEventListener('input', function () {
+    this.dataset.dragging = '1';
+    var idx = parseInt(this.value, 10);
+    if (focusWords.length && idx >= 0 && idx < focusWords.length && idx !== focusIndex) {
+      focusIndex = idx;
+      focusRender();
+    }
+  });
+  focusSliderEl.addEventListener('change', function () {
+    delete this.dataset.dragging;
   });
 }
 

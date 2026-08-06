@@ -133,6 +133,8 @@ class StudyProgress(models.Model):
     is_today_new = models.BooleanField(default=False, verbose_name='今日新学')
     learned_date = models.DateField(null=True, blank=True,
         verbose_name='首次学习日期', db_index=True)
+    uncommon_pos = models.TextField(blank=True, default='[]',
+        verbose_name='陌生词性', help_text='JSON格式: ["n.", "adj."]')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
     class Meta:

@@ -4,8 +4,28 @@
 {% block title %}设置 - 考研单词背诵系统{% endblock %}
 {% block page_title %}设置{% endblock %}
 
+{% block extra_head %}
+<style>
+  .settings-page { max-width: 1080px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+  .settings-page > .card { margin: 0 !important; }
+  .settings-page > .card:nth-of-type(3), .settings-page > .card:nth-of-type(4), .settings-page > .card:nth-of-type(5), .settings-page > .card:nth-of-type(6) { grid-column: 1 / -1; }
+  .settings-page .card-header { display: flex; align-items: center; gap: 7px; }
+  .settings-page .card-header::before { color: var(--c-green); font-family: sans-serif; }
+  .settings-page > .card:nth-of-type(1) .card-header::before { content: '◐'; }
+  .settings-page > .card:nth-of-type(2) .card-header::before { content: '♪'; }
+  .settings-page > .card:nth-of-type(3) .card-header::before { content: '◎'; }
+  .settings-page > .card:nth-of-type(4) .card-header::before { content: '✦'; }
+  .settings-page > .card:nth-of-type(5) .card-header::before { content: '▣'; }
+  .settings-page .form-group:last-of-type { margin-bottom: 0; }
+  .settings-page .form-group > .flex.items-center { background: var(--c-surface-2); }
+  .settings-page > .card:nth-of-type(6) { color: var(--c-text-2); }
+  @media (max-width: 760px) { .settings-page { grid-template-columns: 1fr; } .settings-page > .card { grid-column: 1 / -1 !important; } }
+</style>
+{% endblock %}
+
 {% block content %}
 {% csrf_token %}
+<div class="settings-page">
 
 <!-- Display Settings -->
 <div class="card" style="margin-bottom: 24px;">
@@ -177,7 +197,7 @@
   </div>
 </div>
 
-
+</div>
 
 {% endblock %}
 

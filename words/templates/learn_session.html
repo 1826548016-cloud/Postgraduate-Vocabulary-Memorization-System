@@ -4,48 +4,83 @@
 {% block title %}背诵中{% endblock %}
 {% block page_title %}背诵中{% endblock %}
 
+{% block extra_head %}
+<style>
+  .learn-session { max-width: 820px; margin: 0 auto; }
+  .learn-progress { padding: 13px 16px; margin-bottom: 18px; }
+  .learn-progress-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .learn-progress-slider {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 8px; border-radius: 4px;
+    background: var(--c-border); outline: none; cursor: pointer;
+    margin-top: 4px;
+  }
+  .learn-progress-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--c-green); cursor: pointer;
+    border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.2);
+  }
+  .learn-progress-slider::-moz-range-thumb {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--c-green); cursor: pointer; border: 2px solid #fff;
+  }
+  .study-card { min-height: 540px; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 52px 44px; }
+  .study-card .word-text { margin-top: 44px; font-size: clamp(2.4rem, 7vw, 4.8rem); line-height: 1.12; }
+  .study-card .word-phonetic { font-size: var(--fs-lg); }
+  .study-card .word-pos { margin: 10px 0 26px; }
+  .study-tools { display: flex; gap: 8px; position: absolute; align-self: flex-end; }
+  .study-card { position: relative; }
+  .study-tools .btn { min-width: auto; padding: 7px 9px; }
+  .study-card .word-meaning { width: min(100%, 580px); margin: 20px 0; text-align: left; }
+  .study-card .word-example { width: min(100%, 580px); text-align: left; }
+  .study-primary-action { margin-top: auto; width: 100%; }
+  .study-primary-action .btn { min-width: min(100%, 300px); }
+  .study-mark-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: min(100%, 500px); margin-top: 14px; }
+  .study-mark-actions .btn { min-width: 0; }
+  .study-navigation { display: flex; justify-content: space-between; width: 100%; margin-top: 26px; }
+  .completion-card { text-align: center; }
+  @media (max-width: 640px) { .study-card { min-height: 480px; padding: 44px 20px 28px; } .study-tools { position: static; align-self: center; order: 4; margin-top: 18px; } .study-card .word-text { margin-top: 20px; } }
+</style>
+{% endblock %}
+
 {% block content %}
 {% csrf_token %}
 
-<div class="card mb-4">
-  <div class="flex justify-between items-center gap-4 mb-4">
-    <div class="text-secondary text-sm">
-      <span>进度：</span>
-      <span id="progressText">-</span>
+<div class="learn-session">
+  <div class="card learn-progress">
+    <div class="learn-progress-top">
+      <a href="{% url 'words:learn_start' %}" class="text-secondary text-sm"><i class="ph ph-arrow-left"></i> 退出背诵</a>
+      <div class="flex gap-2 items-center"><span class="text-secondary text-sm" id="progressText">-</span><span class="badge badge-learning">{{ mode }}</span></div>
     </div>
-    <div class="flex gap-2 items-center">
-      <span class="badge badge-learning">{{ mode }}</span>
-    </div>
+    <div class="progress-bar"><div id="progressFill" class="progress-bar-fill" style="width: 0%;"></div></div>
+    <input type="range" id="progressSlider" class="learn-progress-slider" min="0" max="1" value="0" step="1" style="margin-top: 8px;" title="拖动跳转单词">
   </div>
-  <div class="progress-bar">
-    <div id="progressFill" class="progress-bar-fill" style="width: 0%;"></div>
-  </div>
-</div>
 
-<div id="wordCard" class="card word-card">
-  <div id="wordText" class="word-text">加载中…</div>
-  <div class="flex gap-2 items-center" style="margin-bottom: 12px;">
-    <button id="speakBtn" class="btn btn-secondary btn-sm" title="发音">🔊 发音</button>
-    <button id="noteBtn" class="btn btn-secondary btn-sm" title="记笔记 / 查看笔记"><i class="ph ph-note-pencil"></i> 笔记</button>
-    <button id="quickMemoryBtn" class="btn btn-secondary btn-sm" title="AI 速记 / 查看速记"><i class="ph ph-lightning"></i> 速记</button>
+<div id="wordCard" class="card word-card study-card">
+  <div class="study-tools">
+    <button id="speakBtn" class="btn btn-secondary btn-sm" title="发音"><i class="ph ph-speaker-high"></i><span class="text-sm"> 发音</span></button>
+    <button id="noteBtn" class="btn btn-secondary btn-sm" title="记笔记 / 查看笔记"><i class="ph ph-note-pencil"></i><span class="text-sm"> 笔记</span></button>
+    <button id="quickMemoryBtn" class="btn btn-secondary btn-sm" title="AI 速记 / 查看速记"><i class="ph ph-lightning"></i><span class="text-sm"> 速记</span></button>
   </div>
+  <div id="wordText" class="word-text">加载中…</div>
   <div id="wordPhonetic" class="word-phonetic">—</div>
   <div id="wordPos" class="word-pos">—</div>
   <div id="wordMeaning" class="word-meaning hidden">—</div>
   <div id="wordExample" class="word-example hidden">—</div>
 
-  <div class="word-card-actions">
+  <div class="word-card-actions study-primary-action">
     <button id="revealBtn" class="btn btn-primary btn-lg">显示释义 <span class="text-sm">(空格)</span></button>
   </div>
 
-  <div class="word-card-actions">
-    <button data-action="mastered" class="mark-btn btn btn-primary btn-lg">会 <span class="text-sm">(1)</span></button>
+  <div class="study-mark-actions">
     <button data-action="unknown" class="mark-btn btn btn-danger btn-lg">不会 <span class="text-sm">(2)</span></button>
+    <button data-action="mastered" class="mark-btn btn btn-primary btn-lg">会 <span class="text-sm">(1)</span></button>
   </div>
 
-  <div class="flex justify-center gap-4 mt-6">
-    <button id="prevBtn" class="btn btn-secondary">上一词 <span class="text-sm">(←)</span></button>
-    <button id="nextBtn" class="btn btn-secondary">下一词 <span class="text-sm">(→)</span></button>
+  <div class="study-navigation">
+    <button id="prevBtn" class="btn btn-secondary"><i class="ph ph-arrow-left"></i> 上一词</button>
+    <button id="nextBtn" class="btn btn-secondary">下一词 <i class="ph ph-arrow-right"></i></button>
   </div>
 
   <!-- 笔记 / 速记 展开区（共享组件） -->
@@ -55,7 +90,7 @@
   {% include '_assistant_panel.html' %}
 </div>
 
-<div id="completionCard" class="card word-card hidden">
+<div id="completionCard" class="card word-card completion-card hidden">
   <div class="card-header"><i class="ph ph-check-circle" style="color: var(--c-green);"></i> 背诵完成</div>
   <p class="text-secondary" id="completionMsg"></p>
   <div class="summary-grid">
@@ -69,6 +104,7 @@
     </div>
   </div>
   <a href="{% url 'words:dashboard' %}" class="btn btn-primary btn-lg">返回仪表盘</a>
+</div>
 </div>
 {% endblock %}
 
@@ -121,6 +157,8 @@
     var pct = wordCount > 0 ? ((currentIndex + 1) / wordCount * 100) : 0;
     els.progressText.textContent = (currentIndex + 1) + ' / ' + wordCount;
     els.progressFill.style.width = pct + '%';
+    var slider = document.getElementById('progressSlider');
+    if (slider && !slider.dataset.dragging) slider.value = currentIndex;
   }
 
   function doSpeak(text) { window.VOCAB_SPEAK(text); }
@@ -185,18 +223,57 @@
       .map(function (k) { return { pos: k, meanings: byPos[k] }; });
   }
 
+  // 切换词性熟悉/陌生状态
+  function toggleUncommonPos(pos, btn) {
+    if (!currentWord) return;
+    var uncommon = currentWord.uncommon_pos || [];
+    var action = uncommon.indexOf(pos) === -1 ? 'add' : 'remove';
+    VOCAB_API.post('/api/mark-uncommon-pos/' + currentWord.id + '/', { pos: pos, action: action })
+      .then(function (res) {
+        if (res && res.success) {
+          currentWord.uncommon_pos = res.uncommon_pos;
+          if (btn) {
+            btn.classList.remove('is-familiar', 'is-uncommon');
+            btn.classList.add(action === 'add' ? 'is-uncommon' : 'is-familiar');
+            btn.innerHTML = action === 'add'
+              ? '<i class="ph ph-warning-circle"></i> 陌生'
+              : '<i class="ph ph-check"></i> 熟悉';
+            // 同步父分组的视觉高亮
+            var group = btn.closest('.pos-group');
+            if (group) group.classList.toggle('pos-uncommon', action === 'add');
+          }
+        }
+      })
+      .catch(function () {
+        if (typeof showToast === 'function') showToast('标记失败', 'error');
+      });
+  }
+
+  // 词性熟悉/陌生切换按钮事件委托
+  els.wordMeaning.addEventListener('click', function (e) {
+    var btn = e.target.closest('.pos-fam-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    toggleUncommonPos(btn.dataset.pos, btn);
+  });
+
   // 按一次空格：一次性显示所有词性的释义 + 例句
   function reveal() {
     if (revealDone || !currentWord) return;
     revealDone = true;
     var groups = getPosGroups(currentWord);
+    var uncommon = currentWord.uncommon_pos || [];
     if (groups.length === 0) {
       // 无按词性分组：回退旧模式
       els.wordMeaning.innerHTML = formatMeanings(currentWord);
     } else {
       els.wordMeaning.innerHTML = groups.map(function (g) {
-        return '<div class="pos-group">' +
+        var isUncommon = uncommon.indexOf(g.pos) !== -1;
+        var btnClass = isUncommon ? 'pos-fam-btn is-uncommon' : 'pos-fam-btn is-familiar';
+        var btnIcon = isUncommon ? '<i class="ph ph-warning-circle"></i> 陌生' : '<i class="ph ph-check"></i> 熟悉';
+        return '<div class="pos-group' + (isUncommon ? ' pos-uncommon' : '') + '">' +
           '<span class="meaning-pos">' + escapeHtml(g.pos) + '</span> ' +
+          '<span class="pos-fam-btn ' + btnClass + '" data-pos="' + escapeHtml(g.pos) + '" title="标记该词性为熟悉/陌生">' + btnIcon + '</span><br>' +
           g.meanings.map(function (m) { return '<span class="meaning-item">' + escapeHtml(m) + '</span>'; }).join(' ') +
         '</div>';
       }).join('');
@@ -242,6 +319,7 @@
   }
 
   function showCompletion() {
+    if (window.VocabStudyTimer) VocabStudyTimer.stop();
     els.wordCard.classList.add('hidden');
     els.completionCard.classList.remove('hidden');
     els.masteredCount.textContent = counts.mastered;
@@ -257,6 +335,23 @@
   document.getElementById('speakBtn').addEventListener('click', replayAudio);
   document.getElementById('prevBtn').addEventListener('click', goPrev);
   document.getElementById('nextBtn').addEventListener('click', goNext);
+
+  // 进度条拖动跳转
+  var slider = document.getElementById('progressSlider');
+  if (slider) {
+    slider.max = Math.max(0, wordCount - 1);
+    slider.addEventListener('input', function () {
+      this.dataset.dragging = '1';
+      var idx = parseInt(this.value, 10);
+      if (idx >= 0 && idx < wordCount && idx !== currentIndex) {
+        currentIndex = idx;
+        renderWord();
+      }
+    });
+    slider.addEventListener('change', function () {
+      delete this.dataset.dragging;
+    });
+  }
 
   document.querySelectorAll('.mark-btn').forEach(function(btn) {
     btn.addEventListener('click', function() { mark(btn.dataset.action); });
@@ -301,6 +396,7 @@
   });
 
   // Init
+  if (wordCount > 0 && window.VocabStudyTimer) VocabStudyTimer.start();
   if (wordCount === 0) {
     els.wordText.textContent = '没有可学习的单词';
     els.revealBtn.style.display = 'none';

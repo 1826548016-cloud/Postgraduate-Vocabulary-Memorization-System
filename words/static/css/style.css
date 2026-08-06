@@ -771,3 +771,74 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 .pos-group .meaning-pos { margin-right: 6px; }
 .pos-group .meaning-item { display: inline-block; margin: 2px 6px 2px 0; }
 .pos-group + .pos-group { margin-top: 8px; }
+
+/* 陌生词性高亮 */
+.pos-group.pos-uncommon {
+  border-left: 3px solid #d97706;
+  background: rgba(217, 119, 6, .08);
+}
+.pos-fam-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--c-border); border-radius: 12px;
+  padding: 1px 8px; font-size: 11px; cursor: pointer;
+  background: var(--c-surface); color: var(--c-text-2);
+  margin-left: 6px; vertical-align: middle; user-select: none;
+  transition: all .15s;
+}
+.pos-fam-btn:hover { border-color: var(--c-green); }
+.pos-fam-btn.is-familiar { background: #dcfce7; color: #166534; border-color: #86efac; }
+.pos-fam-btn.is-uncommon { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+
+/* 复习模式切换条 */
+.review-mode-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 10px; padding: 8px 12px;
+  background: var(--c-surface-2); border-radius: var(--radius-sm);
+  border: 1px solid var(--c-border);
+}
+.review-mode-bar .mode-btn {
+  border: 1px solid var(--c-border); border-radius: 14px;
+  padding: 3px 12px; font-size: var(--fs-sm); cursor: pointer;
+  background: var(--c-surface); color: var(--c-text-2);
+}
+.review-mode-bar .mode-btn.is-active { background: #8a6f9e; color: #fff; border-color: #8a6f9e; }
+.pos-expand-all {
+  display: inline-block; margin-top: 6px; cursor: pointer;
+  color: var(--c-text-3); font-size: var(--fs-sm);
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.pos-expand-all:hover { color: var(--c-green); }
+
+/* ===== 计划驱动：今日学习中心 ===== */
+.plan-today-card { border: 2px solid var(--c-green, #16a34a); }
+.today-task-card {
+  text-align: center; padding: 16px 12px;
+  border: 1px solid var(--c-border); border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+}
+.today-task-card .btn { margin-top: 4px; }
+
+/* 本周日历 */
+.weekly-calendar {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 6px; text-align: center;
+}
+.weekday-cell {
+  padding: 10px 4px; border-radius: var(--radius-sm);
+  border: 1px solid var(--c-border); background: var(--c-surface-2);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  min-height: 72px;
+}
+.weekday-label { font-size: var(--fs-xs); color: var(--c-text-3); font-weight: 600; }
+.weekday-icon { font-size: var(--fs-lg); line-height: 1.4; }
+.weekday-count { font-size: var(--fs-xs); color: var(--c-text-2); }
+.weekday-done { background: #dcfce7; border-color: #86efac; }
+.weekday-done .weekday-icon { color: #16a34a; }
+.weekday-today { background: #fef3c7; border-color: #fcd34d; border-width: 2px; }
+.weekday-today .weekday-icon { color: #d97706; }
+.weekday-missed { background: #fef2f2; border-color: #fecaca; }
+.weekday-missed .weekday-icon { color: #dc2626; opacity: .5; }
+.weekday-future { background: var(--c-surface-2); opacity: .5; }
+
+/* 一键开始今日学习卡片 */
+.plan-quick-start { border-radius: var(--radius); }

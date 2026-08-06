@@ -14,6 +14,7 @@ from django.db.models import Q, Count, Sum, Avg, F, Max
 from django.http import JsonResponse, HttpResponse, FileResponse
 from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
+from django.db import IntegrityError
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
@@ -26,6 +27,16 @@ from .ai_prompts import (
     recognize_image_prompt, recognize_text_prompt, recognize_file_prompt,
     ai_review_prompt,
 )
+
+
+def parse_uncommon_pos(value):
+    """解析 StudyProgress.uncommon_pos 字段为 list，容错脏数据。"""
+    try:
+        data = json.loads(value or '[]')
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
 
 # ─── 帮助函数 ───────────────────────────────────────────────
 
@@ -96,6 +107,7 @@ def dashboard(request):
 
     streak = get_streak()
     today_checkin = DailyCheckIn.objects.filter(date=today).first()
+    today_duration = today_checkin.study_duration if today_checkin else 0
 
     checkin_words = today_new + today_review
     checkin_threshold = CHECKIN_DAILY_WORDS
@@ -123,12 +135,18 @@ def dashboard(request):
         d += timedelta(days=1)
     total_study_days = sum(1 for v in heat_map.values() if v > 0)
 
+    # 计划驱动的今日学习数据
+    plan_today = None
+    if active_plan:
+        plan_today = _get_plan_today_data(active_plan, today)
+
     context = {
         'today_new': today_new,
         'today_review': today_review,
         'review_due': review_due,
         'settings': settings_obj,
         'plan': active_plan,
+        'plan_today': plan_today,
         'total_words': total_words,
         'mastered_words': mastered_words,
         'learning_words': learning_words,
@@ -140,6 +158,7 @@ def dashboard(request):
         'checkin_percent': checkin_percent,
         'heatmap_days': heatmap_days,
         'total_study_days': total_study_days,
+        'today_duration': today_duration,
     }
     return render(request, 'dashboard.html', context)
 
@@ -174,7 +193,12 @@ def word_detail(request, word_id):
 
 def learn_start(request):
     units = Unit.objects.all()
-    return render(request, 'learn_start.html', {'units': units})
+    today = timezone.localdate()
+    plan_today = None
+    active_plan = StudyPlan.objects.filter(is_active=True).first()
+    if active_plan:
+        plan_today = _get_plan_today_data(active_plan, today)
+    return render(request, 'learn_start.html', {'units': units, 'plan_today': plan_today})
 
 
 def learn_session(request):
@@ -200,8 +224,15 @@ def learn_session(request):
     else:
         words = sorted(words, key=lambda w: (w.unit.number, w.list_number))
 
+    # 批量预取进度，避免 N+1
+    word_ids = [w.id for w in words]
+    progress_map = {
+        p.word_id: p for p in StudyProgress.objects.filter(word_id__in=word_ids)
+    }
+
     word_data = []
     for w in words:
+        p = progress_map.get(w.id)
         word_data.append({
             'id': w.id,
             'word': w.word,
@@ -212,6 +243,7 @@ def learn_session(request):
             'example_en': w.example_en,
             'example_zh': w.example_zh,
             'unit_number': w.unit.number if w.unit else None,
+            'uncommon_pos': parse_uncommon_pos(p.uncommon_pos if p else None),
         })
 
     # 用 session 记录词 ID 列表（供复习页用）
@@ -251,6 +283,7 @@ def review_session(request):
             'error_count': p.error_count,
             'review_count': p.review_count,
             'status': p.status,
+            'uncommon_pos': parse_uncommon_pos(p.uncommon_pos),
         })
 
     mastered_count = len([p for p in batch if p.status == 'mastered'])
@@ -280,7 +313,13 @@ def exam(request):
 
 def study_plan(request):
     plans = StudyPlan.objects.all().order_by('-is_active', '-created_at')
-    return render(request, 'plan.html', {'plans': plans})
+    today = timezone.localdate()
+    # 为激活计划计算今日学习数据
+    plan_today = None
+    active_plan = StudyPlan.objects.filter(is_active=True).first()
+    if active_plan:
+        plan_today = _get_plan_today_data(active_plan, today)
+    return render(request, 'plan.html', {'plans': plans, 'plan_today': plan_today})
 
 
 def plan_create(request):
@@ -549,6 +588,39 @@ def api_toggle_mastery(request, word_id):
         return JsonResponse({'error': str(e)}, status=400)
 
 
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_mark_uncommon_pos(request, word_id):
+    """标记/取消标记某个词性为陌生（add/remove）。"""
+    try:
+        data = json.loads(request.body or '{}')
+        pos = str(data.get('pos', '')).strip()
+        action = data.get('action', 'add')
+        if not pos:
+            return JsonResponse({'error': '缺少词性'}, status=400)
+        if action not in ('add', 'remove'):
+            return JsonResponse({'error': 'action 参数无效'}, status=400)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({'error': '参数格式错误'}, status=400)
+
+    # 处理并发 get_or_create 的竞争条件
+    try:
+        progress, _ = StudyProgress.objects.get_or_create(word_id=word_id)
+    except IntegrityError:
+        progress = StudyProgress.objects.get(word_id=word_id)
+
+    uncommon = parse_uncommon_pos(progress.uncommon_pos)
+
+    if action == 'add' and pos not in uncommon:
+        uncommon.append(pos)
+    elif action == 'remove' and pos in uncommon:
+        uncommon = [p for p in uncommon if p != pos]
+
+    progress.uncommon_pos = json.dumps(uncommon, ensure_ascii=False)
+    progress.save(update_fields=['uncommon_pos'])
+    return JsonResponse({'success': True, 'uncommon_pos': uncommon})
+
+
 def api_today(request):
     today = timezone.localdate()
     settings_obj = UserSettings.get_settings()
@@ -577,6 +649,7 @@ def api_today(request):
         'meanings': p.word.get_meanings(),
         'meanings_by_pos': p.word.get_meanings_by_pos(),
         'mastery_level': p.mastery_level,
+        'uncommon_pos': parse_uncommon_pos(p.uncommon_pos),
     } for p in review_batch]
 
     due_count = len(all_progress)  # 总已学词数即为待复习数
@@ -678,6 +751,106 @@ def api_plan_delete(request, plan_id):
         return JsonResponse({'error': str(e)}, status=400)
 
 
+def _get_plan_today_data(plan, today):
+    """计算激活计划的今日学习数据（供页面渲染和 API 共用）"""
+    unit_nums = plan.get_unit_range()
+
+    # 计划范围内的总词数 / 已掌握词数
+    if unit_nums:
+        total_words = Word.objects.filter(unit__number__in=unit_nums).count()
+        mastered = StudyProgress.objects.filter(
+            word__unit__number__in=unit_nums, status='mastered').count()
+    else:
+        total_words = Word.objects.count()
+        mastered = StudyProgress.objects.filter(status='mastered').count()
+
+    # 今日已学新词数
+    today_new_done = StudyProgress.objects.filter(
+        learned_date=today,
+        **({'word__unit__number__in': unit_nums} if unit_nums else {})
+    ).count()
+
+    # 今日已复习数
+    today_review_done = StudyProgress.objects.filter(
+        last_review__date=today, review_count__gt=0,
+        **({'word__unit__number__in': unit_nums} if unit_nums else {})
+    ).exclude(learned_date=today).count()
+
+    # 剩余单词
+    remaining = max(0, total_words - mastered)
+
+    # 预计天数
+    est_days = (remaining + plan.daily_new_words - 1) // plan.daily_new_words if plan.daily_new_words > 0 else 0
+
+    # 倒计时
+    days_left = (plan.target_date - today).days if plan.target_date else None
+
+    # 整体进度百分比
+    overall_pct = round(mastered / total_words * 100, 1) if total_words > 0 else 0
+
+    # 本周每日完成情况（周一到周日）
+    weekday = today.weekday()  # 0=周一
+    week_start = today - timedelta(days=weekday)
+    weekly = []
+    for i in range(7):
+        d = week_start + timedelta(days=i)
+        new_cnt = StudyProgress.objects.filter(
+            learned_date=d,
+            **({'word__unit__number__in': unit_nums} if unit_nums else {})
+        ).count()
+        rev_cnt = StudyProgress.objects.filter(
+            last_review__date=d, review_count__gt=0,
+            **({'word__unit__number__in': unit_nums} if unit_nums else {})
+        ).exclude(learned_date=d).count()
+        total_cnt = new_cnt + rev_cnt
+        if d > today:
+            status = 'future'
+        elif total_cnt == 0:
+            status = 'missed'
+        elif d == today:
+            status = 'today'
+        else:
+            status = 'done'
+        weekly.append({
+            'date': d.isoformat(),
+            'weekday': ['一', '二', '三', '四', '五', '六', '日'][i],
+            'new_count': new_cnt,
+            'review_count': rev_cnt,
+            'total': total_cnt,
+            'status': status,
+        })
+
+    return {
+        'plan_id': plan.id,
+        'plan_name': plan.name,
+        'daily_new_target': plan.daily_new_words,
+        'daily_review_target': plan.daily_review_count,
+        'today_new_done': today_new_done,
+        'today_review_done': today_review_done,
+        'total_words': total_words,
+        'mastered': mastered,
+        'remaining': remaining,
+        'estimated_days': est_days,
+        'days_left': days_left,
+        'overall_percent': overall_pct,
+        'target_date': plan.target_date.isoformat() if plan.target_date else None,
+        'weekly': weekly,
+    }
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def api_plan_today(request):
+    """返回当前激活计划的今日学习任务与进度"""
+    plan = StudyPlan.objects.filter(is_active=True).first()
+    if not plan:
+        return JsonResponse({'success': False, 'error': '没有激活的学习计划'}, status=404)
+    today = timezone.localdate()
+    data = _get_plan_today_data(plan, today)
+    data['success'] = True
+    return JsonResponse(data)
+
+
 def api_stats(request, period):
     today = timezone.localdate()
     if period == '7':
@@ -772,6 +945,26 @@ def api_stats(request, period):
         'category_progress': cat_progress,
         'level_distribution': status_dist,
     })
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_study_duration(request):
+    """累加当前学习页的有效前台时长（秒）。"""
+    try:
+        data = json.loads(request.body or '{}')
+        seconds = int(data.get('seconds', 0))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return JsonResponse({'error': '时长格式错误'}, status=400)
+
+    # 客户端每 20 秒同步一次；限制单次上报，避免异常请求造成统计失真。
+    seconds = max(0, min(seconds, 90))
+    if seconds == 0:
+        return JsonResponse({'success': True, 'added': 0})
+
+    checkin, _ = DailyCheckIn.objects.get_or_create(date=timezone.localdate())
+    DailyCheckIn.objects.filter(pk=checkin.pk).update(study_duration=F('study_duration') + seconds)
+    return JsonResponse({'success': True, 'added': seconds})
 
 
 def api_export_pdf(request):
@@ -1350,8 +1543,15 @@ def api_learn_words(request):
     else:
         words = sorted(words, key=lambda w: (w.unit.number, w.list_number))
 
+    # 批量预取进度，避免 N+1
+    word_ids = [w.id for w in words]
+    progress_map = {
+        p.word_id: p for p in StudyProgress.objects.filter(word_id__in=word_ids)
+    }
+
     word_data = []
     for w in words:
+        p = progress_map.get(w.id)
         word_data.append({
             'id': w.id,
             'word': w.word,
@@ -1362,6 +1562,7 @@ def api_learn_words(request):
             'example_en': w.example_en,
             'example_zh': w.example_zh,
             'unit_number': w.unit.number if w.unit else None,
+            'uncommon_pos': parse_uncommon_pos(p.uncommon_pos if p else None),
         })
 
     return JsonResponse({'words': word_data, 'total': len(word_data)})

@@ -357,6 +357,7 @@ function renderNavigator() {
 
 // ===== 计时 =====
 function startExamTimer() {
+  if (window.VocabStudyTimer) VocabStudyTimer.start();
   if (examTimerInt) clearInterval(examTimerInt);
   examTimerInt = setInterval(function () {
     const sec = Math.floor((Date.now() - examState.start) / 1000);
@@ -406,6 +407,7 @@ async function submitExam() {
 
 // ===== 成绩 =====
 function renderResult(res) {
+  if (window.VocabStudyTimer) VocabStudyTimer.stop();
   document.getElementById('examAnswer').classList.add('hidden');
   document.getElementById('examResult').classList.remove('hidden');
 
