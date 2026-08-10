@@ -198,3 +198,26 @@ def ai_review_prompt(words_json):
         '- 只输出 JSON 本身，不要输出任何多余文字、不要用代码块包裹\n\n'
         '待复审的单词列表：\n' + words_json
     )
+
+
+def weekly_report_prompt(summary):
+    """生成周学习报告的 AI 评语。
+
+    summary 为统计快照字典，包含：
+      - period_label / new_words / reviewed_words / study_duration / correct_rate / streak
+      - total_words / mastered_words / learning_words / new_not_learned / excluded_words
+      - mastery_rate / days_to_finish / finish_date_label
+      - weak_words（易错词 Top） / weak_pos（陌生词性 Top）
+      - best_day（学习最多的一天） / active_days
+    """
+    return (
+        '你是一位经验丰富的考研英语学习规划师，正在给学生写一份周学习报告评语。\n'
+        '要求：\n'
+        '1. 用中文输出，语气亲切、鼓励为主，但评价要客观具体\n'
+        '2. 3-5 个自然段：先总结本周表现，再指出亮点，然后点出薄弱环节，最后给出下周建议\n'
+        '3. 薄弱环节要结合「易错词」和「陌生词性」数据具体指出，不要泛泛而谈\n'
+        '4. 如数据异常少（如本周没怎么学），要温和提醒并给出可执行的恢复建议\n'
+        '5. 总字数控制在 250 字左右\n'
+        '6. 直接输出评语正文，不要标题、不要列表符号、不要任何多余格式\n\n'
+        '本周学习数据：\n' + summary
+    )

@@ -5,73 +5,14 @@
 
 // 模型服务商预设（全部为 OpenAI 兼容接口），models 元素: { id, vision: 是否支持图片识别 }
 var AI_PROVIDERS = [
-  { id: 'openai', name: 'OpenAI', base: 'https://api.openai.com/v1', models: [
-    { id: 'gpt-4o', vision: true }, { id: 'gpt-4o-mini', vision: true },
-    { id: 'gpt-4.1', vision: true }, { id: 'gpt-4.1-mini', vision: true },
-  ]},
-  { id: 'gemini', name: 'Google Gemini', base: 'https://generativelanguage.googleapis.com/v1beta/openai', models: [
-    { id: 'gemini-2.5-pro', vision: true }, { id: 'gemini-2.5-flash', vision: true },
-    { id: 'gemini-2.0-flash', vision: true },
-  ]},
-  { id: 'anthropic', name: 'Anthropic Claude', base: 'https://api.anthropic.com/v1', models: [
-    { id: 'claude-sonnet-4-5', vision: true }, { id: 'claude-opus-4-1', vision: true },
-    { id: 'claude-3-7-sonnet', vision: true },
-  ]},
-  { id: 'xai', name: 'xAI (Grok)', base: 'https://api.x.ai/v1', models: [
-    { id: 'grok-4', vision: true }, { id: 'grok-4-fast', vision: true }, { id: 'grok-3', vision: true },
-  ]},
-  { id: 'qwen', name: '通义千问 (阿里云百炼)', base: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: [
-    { id: 'qwen-vl-max', vision: true }, { id: 'qwen-vl-plus', vision: true },
-    { id: 'qwen2.5-vl-72b-instruct', vision: true },
-  ]},
-  { id: 'zhipu', name: '智谱 GLM (BigModel)', base: 'https://open.bigmodel.cn/api/paas/v4', models: [
-    { id: 'glm-4v-plus', vision: true }, { id: 'glm-4v-flash', vision: true },
-    { id: 'glm-4.5v', vision: true }, { id: 'glm-4.5', vision: false },
-  ]},
   { id: 'deepseek', name: 'DeepSeek', base: 'https://api.deepseek.com/v1', models: [
     { id: 'deepseek-chat', vision: false }, { id: 'deepseek-reasoner', vision: false },
   ]},
-  { id: 'kimi', name: '月之暗面 Kimi', base: 'https://api.moonshot.cn/v1', models: [
-    { id: 'kimi-latest', vision: true }, { id: 'moonshot-v1-8k', vision: true },
+  { id: 'codex2api', name: 'Codex2API', base: 'https://www.codex2api.com/v1', models: [
+    { id: 'gpt-5.6-sol', vision: true }, { id: 'gpt-5.2', vision: true },
+    { id: 'gpt-5.2-chat-latest', vision: true }, { id: 'gpt-5.2-pro', vision: true },
+    { id: 'gpt-5.3-codex', vision: true }, { id: 'gpt-5.3-codex-spark', vision: true },
   ]},
-  { id: 'siliconflow', name: '硅基流动 SiliconFlow', base: 'https://api.siliconflow.cn/v1', models: [
-    { id: 'Qwen/Qwen2.5-VL-72B-Instruct', vision: true },
-    { id: 'Qwen/Qwen2.5-VL-32B-Instruct', vision: true },
-    { id: 'deepseek-ai/deepseek-vl2', vision: true },
-  ]},
-  { id: 'ark', name: '火山引擎 (豆包)', base: 'https://ark.cn-beijing.volces.com/api/v3', models: [
-    { id: 'doubao-seed-1.6-vision', vision: true },
-    { id: 'doubao-1.5-vision-pro', vision: true },
-  ]},
-  { id: 'hunyuan', name: '腾讯混元', base: 'https://api.hunyuan.cloud.tencent.com/v1', models: [
-    { id: 'hunyuan-vision', vision: true }, { id: 'hunyuan-lite', vision: true },
-  ]},
-  { id: 'qianfan', name: '百度千帆', base: 'https://qianfan.baidubce.com/v2', models: [
-    { id: 'ernie-4.5-vl-8b', vision: true }, { id: 'ernie-4.5-vl-2b-fp8', vision: true },
-  ]},
-  { id: 'minimax', name: 'MiniMax', base: 'https://api.minimax.chat/v1', models: [
-    { id: 'MiniMax-VL-01', vision: true }, { id: 'MiniMax-M2', vision: true },
-  ]},
-  { id: 'groq', name: 'Groq', base: 'https://api.groq.com/openai/v1', models: [
-    { id: 'llama-3.2-90b-vision-preview', vision: true },
-    { id: 'llama-3.2-11b-vision-preview', vision: true },
-  ]},
-  { id: 'mistral', name: 'Mistral', base: 'https://api.mistral.ai/v1', models: [
-    { id: 'pixtral-large-2509', vision: true }, { id: 'pixtral-12b', vision: true },
-  ]},
-  { id: 'openrouter', name: 'OpenRouter', base: 'https://openrouter.ai/api/v1', models: [
-    { id: 'openai/gpt-4o', vision: true }, { id: 'google/gemini-2.5-flash', vision: true },
-  ]},
-  { id: 'ollama', name: 'Ollama (本地)', base: 'http://localhost:11434/v1', models: [
-    { id: 'llama3.2-vision', vision: true }, { id: 'qwen2.5-vl', vision: true },
-  ]},
-  { id: 'novita', name: 'Novita', base: 'https://api.novita.ai/v3/openai', models: [
-    { id: 'google/gemini-2.5-flash', vision: true }, { id: 'meta-llama/llama-3.2-90b-vision', vision: true },
-  ]},
-  { id: 'zai', name: 'Z.ai (GLM 海外)', base: 'https://api.z.ai/api/paas/v4', models: [
-    { id: 'glm-4.5v', vision: true }, { id: 'glm-4v-plus', vision: true },
-  ]},
-  { id: 'opencode', name: 'opencode (本地服务)', base: 'http://localhost:4096/v1', models: [] },
   { id: 'custom', name: '自定义（OpenAI 兼容）', base: 'https://api.openai.com/v1', models: [] },
 ];
 

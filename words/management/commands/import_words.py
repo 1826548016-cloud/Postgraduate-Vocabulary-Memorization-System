@@ -8,7 +8,7 @@ import re
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Max
 from words.models import Unit, Word
-from words.views import normalize_word_data
+from words.views import normalize_word_data, ai_complete_words
 
 
 def clean_unit_name(name, number):
@@ -54,6 +54,7 @@ class Command(BaseCommand):
         total_units = 0
         total_words = 0
         skipped = 0
+        created_words = []
 
         for unit_data in units_data:
             unit_number = unit_data.get('number', 0)
@@ -88,7 +89,7 @@ class Command(BaseCommand):
                     skipped += 1
                     continue
 
-                Word.objects.create(
+                created_word = Word.objects.create(
                     word=nd['word'],
                     phonetic_us=nd['phonetic_us'],
                     phonetic_uk=nd['phonetic_uk'],
@@ -104,6 +105,7 @@ class Command(BaseCommand):
                     unit=unit,
                     list_number=next_list_number,
                 )
+                created_words.append(created_word)
                 next_list_number += 1
                 total_words += 1
 
@@ -112,6 +114,13 @@ class Command(BaseCommand):
             unit.save()
 
             self.stdout.write(f'  List {unit_number}: {unit.words.count()} 个单词')
+
+        # 导入后自动 AI 补全（按词性释义 + 例句），失败不影响导入结果
+        if created_words:
+            try:
+                ai_complete_words(created_words)
+            except Exception:
+                pass
 
         self.stdout.write(self.style.SUCCESS(
             f'\n导入完成！\n'

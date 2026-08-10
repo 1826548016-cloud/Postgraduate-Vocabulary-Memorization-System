@@ -1,0 +1,356 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}AI 智能助手 - 考研单词背诵系统{% endblock %}
+{% block page_title %}AI 智能助手{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* ===== AI 智能助手全屏对话页 ===== */
+  .ai-chat-wrap {
+    display: flex;
+    gap: 0;
+    height: calc(100dvh - 72px);
+    min-height: 480px;
+    overflow: hidden;
+  }
+
+  /* 会话侧栏 */
+  .ai-chat-sidebar {
+    width: 230px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+    overflow: hidden;
+  }
+  .ai-chat-sidebar .new-btn {
+    margin: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .conv-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 8px 8px;
+  }
+  .conv-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 9px;
+    margin-bottom: 4px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--c-text-2);
+    font-size: var(--fs-sm);
+  }
+  .conv-item:hover { background: var(--c-surface-2); }
+  .conv-item.active {
+    background: var(--c-green-bg);
+    color: var(--c-green);
+    font-weight: 600;
+  }
+  .conv-item .title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .conv-item .del {
+    border: 0; background: transparent; cursor: pointer;
+    color: var(--c-text-3); font-size: 13px; padding: 0 2px;
+    opacity: 0;
+  }
+  .conv-item:hover .del { opacity: 1; }
+  .conv-item .del:hover { color: var(--c-red); }
+
+  /* 主对话区 */
+  .ai-chat-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* 顶部栏：模型选择 + 操作 */
+  .ai-chat-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    border-radius: 0 var(--radius-md) 0 0;
+    border-bottom: none;
+  }
+  .ai-chat-header .model-select {
+    min-width: 220px;
+    max-width: 340px;
+  }
+  .ai-chat-header .hint {
+    color: var(--c-text-3);
+    font-size: var(--fs-xs);
+    flex: 1;
+    min-width: 140px;
+  }
+
+  /* 对话主体 */
+  .ai-chat-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .ai-chat-empty {
+    margin: auto;
+    color: var(--c-text-3);
+    text-align: center;
+    font-size: var(--fs-sm);
+    line-height: 2;
+  }
+  .ai-chat-empty .big {
+    font-size: 2.4rem;
+    color: var(--c-green);
+    opacity: .6;
+    display: block;
+    margin-bottom: 8px;
+  }
+
+  /* 消息气泡 */
+  .ai-msg {
+    max-width: 82%;
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: var(--fs-sm);
+    line-height: 1.7;
+    word-break: break-word;
+    white-space: normal;
+  }
+  .ai-msg.user {
+    align-self: flex-end;
+    background: var(--c-green);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .ai-msg.ai {
+    align-self: flex-start;
+    background: var(--c-surface-2);
+    border: 1px solid var(--c-border-light);
+    border-bottom-left-radius: 4px;
+  }
+  .ai-msg .ai-msg-meta {
+    display: block;
+    margin-top: 6px;
+    font-size: 10px;
+    opacity: .65;
+  }
+  .ai-msg.user .ai-msg-meta { text-align: right; }
+
+  /* 附件标签 */
+  .ai-attach-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .ai-attach-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    border-radius: 999px;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    color: var(--c-text-2);
+  }
+  .ai-attach-tag i { color: var(--c-green); }
+
+  /* Markdown 排版（AI 回答） */
+  .ai-msg.ai h1, .ai-msg.ai h2, .ai-msg.ai h3, .ai-msg.ai h4 {
+    margin: 8px 0 4px; font-weight: 700; line-height: 1.4;
+  }
+  .ai-msg.ai h1 { font-size: 1.15rem; }
+  .ai-msg.ai h2 { font-size: 1.08rem; }
+  .ai-msg.ai h3, .ai-msg.ai h4 { font-size: 1rem; }
+  .ai-msg.ai p { margin: 4px 0; }
+  .ai-msg.ai ul, .ai-msg.ai ol { margin: 4px 0; padding-left: 18px; }
+  .ai-msg.ai li { margin: 2px 0; }
+  .ai-msg.ai hr { border: none; border-top: 1px solid var(--c-border); margin: 8px 0; }
+  .ai-msg.ai code {
+    background: rgba(127, 127, 127, .14); padding: 1px 4px; border-radius: 4px;
+    font-size: .9em; font-family: Consolas, Monaco, monospace;
+  }
+  .ai-msg.ai pre {
+    background: rgba(127, 127, 127, .12); padding: 8px 10px; border-radius: 8px;
+    overflow-x: auto; margin: 6px 0; white-space: pre;
+  }
+  .ai-msg.ai pre code { background: none; padding: 0; }
+  .ai-msg.ai blockquote {
+    border-left: 3px solid var(--c-green); background: var(--c-green-bg);
+    margin: 6px 0; padding: 4px 10px; border-radius: 0 8px 8px 0;
+  }
+  .ai-msg.ai table { border-collapse: collapse; margin: 6px 0; width: 100%; font-size: .95em; }
+  .ai-msg.ai th, .ai-msg.ai td { border: 1px solid var(--c-border); padding: 4px 8px; text-align: left; }
+  .ai-msg.ai a { color: var(--c-green); text-decoration: underline; word-break: break-all; }
+
+  /* 待发送附件区 */
+  .ai-attach-pending {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px 0;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    border-top: none;
+  }
+  .ai-attach-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 8px;
+    background: var(--c-surface-2);
+    border: 1px solid var(--c-border);
+    max-width: 220px;
+  }
+  .ai-attach-chip .name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ai-attach-chip .rm {
+    border: 0; background: transparent; cursor: pointer;
+    color: var(--c-text-3); font-size: 14px; padding: 0;
+  }
+  .ai-attach-chip .rm:hover { color: var(--c-red); }
+
+  /* 输入区 */
+  .ai-chat-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    padding: 10px 12px;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    border-top: none;
+  }
+  .ai-chat-input-row textarea {
+    flex: 1;
+    resize: none;
+    min-height: 42px;
+    max-height: 120px;
+  }
+  .ai-chat-input-row .upload-btn {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  .ai-chat-input-row .upload-btn input { display: none; }
+
+  /* 发送中动画 */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinning { animation: spin 1s linear infinite; display: inline-block; }
+
+  /* 小屏适配 */
+  @media (max-width: 768px) {
+    .ai-chat-sidebar { width: 170px; }
+  }
+  @media (max-width: 560px) {
+    .ai-chat-wrap { flex-direction: column; }
+    .ai-chat-sidebar {
+      width: 100%;
+      height: 120px;
+      border-radius: var(--radius-md) var(--radius-md) 0 0;
+      flex-direction: row;
+      align-items: center;
+    }
+    .ai-chat-sidebar .new-btn { margin: 8px; white-space: nowrap; }
+    .conv-list {
+      display: flex;
+      flex-direction: row;
+      gap: 6px;
+      padding: 0 6px 8px;
+      overflow-x: auto;
+    }
+    .conv-item {
+      flex: 0 0 auto;
+      max-width: 150px;
+      margin-bottom: 0;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<div class="ai-chat-wrap">
+  <!-- 会话侧栏 -->
+  <aside class="ai-chat-sidebar">
+    <button class="btn btn-primary new-btn" onclick="AIChat.newConversation()">
+      <i class="ph ph-plus"></i> 新建对话
+    </button>
+    <div class="conv-list" id="convList"></div>
+  </aside>
+
+  <!-- 主对话区 -->
+  <div class="ai-chat-main">
+    <!-- 顶部栏 -->
+    <div class="ai-chat-header">
+      <i class="ph ph-sparkle" style="color: var(--c-green); font-size: 1.3rem;"></i>
+      <strong>AI 智能助手</strong>
+      <select id="aiChatModel" class="form-input model-select" title="选择对话模型">
+        {% for m in models %}
+        <option value="{{ m.id }}" {% if current_model and current_model.id == m.id %}selected{% endif %}>
+          {{ m.display_name|default:m.model_id }}{% if not m.vision %}（纯文本）{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+      <span class="hint">可上传图片 / 文本 / 代码文件，让 AI 帮你分析、讲解、改错</span>
+      <button class="btn btn-secondary btn-sm" onclick="AIChat.clearHistory()" title="清空当前会话记录"><i class="ph ph-trash"></i> 清空</button>
+    </div>
+
+    <!-- 对话主体 -->
+    <div class="ai-chat-body" id="aiChatBody">
+      <div class="ai-chat-empty">
+        <span class="big"><i class="ph ph-sparkle"></i></span>
+        我是你的 AI 智能助手<br>
+        可以帮你分析文件、讲解单词、解答疑问、生成内容…<br>
+        <span style="font-size: var(--fs-xs); opacity: .8;">在下方输入内容，或点击纸夹图标上传文件</span>
+      </div>
+    </div>
+
+    <!-- 待发送附件 -->
+    <div class="ai-attach-pending" id="aiAttachPending"></div>
+
+    <!-- 输入区 -->
+    <div class="ai-chat-input-row">
+      <label class="upload-btn btn btn-secondary" title="上传文件">
+        <i class="ph ph-paperclip"></i>
+        <input type="file" id="aiChatFile" multiple>
+      </label>
+      <textarea id="aiChatInput" class="form-input" rows="1" placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"></textarea>
+      <button id="aiChatSendBtn" class="btn btn-primary" onclick="AIChat.sendFromInput()" title="发送"><i class="ph ph-paper-plane-tilt"></i></button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{% static 'js/ai_chat.js' %}"></script>
+{% endblock %}

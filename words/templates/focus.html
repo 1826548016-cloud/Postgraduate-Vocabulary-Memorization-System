@@ -4,6 +4,30 @@
 {% block title %}专注模式 - 考研单词背诵系统{% endblock %}
 {% block page_title %}专注模式{% endblock %}
 
+{% block extra_head %}
+<style>
+  .check-input {
+    flex: 1; min-width: 0; padding: 12px 16px; font-size: var(--fs-lg);
+    border: 2px solid var(--c-border); border-radius: var(--radius-sm);
+    background: var(--c-surface); color: var(--c-text); text-align: center;
+    letter-spacing: 1px; outline: none; transition: border-color .15s, box-shadow .15s;
+  }
+  .check-input:focus { border-color: var(--c-red); box-shadow: 0 0 0 3px rgba(192,57,43,.14); }
+  .check-input::placeholder { color: var(--c-text-3); letter-spacing: 0; }
+  .check-result { margin-top: 12px; padding: 12px 14px; border-radius: var(--radius-sm); font-size: var(--fs-md); text-align: left; display: none; animation: resultIn .22s ease; }
+  @keyframes resultIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .check-result.result-correct { display: block; background: var(--c-green-bg); border: 1px solid var(--c-green); color: var(--c-green); }
+  .check-result.result-partial { display: block; background: var(--c-amber-bg); border: 1px solid var(--c-amber); color: var(--c-amber); }
+  .check-result.result-wrong { display: block; background: var(--c-red-bg); border: 1px solid var(--c-red); color: var(--c-red); }
+  .check-result-title { font-weight: 700; margin-bottom: 6px; }
+  .check-result .check-comment { margin-top: 4px; opacity: .92; color: var(--c-text-2); }
+  .check-flag { display: inline-block; font-size: var(--fs-xs); padding: 2px 8px; border-radius: 99px; margin-left: 6px; vertical-align: middle; background: var(--c-surface-2); color: var(--c-text-2); }
+  .spell-line { margin: 3px 0; color: var(--c-text-2); }
+  .spell-ok { font-weight: 600; color: var(--c-text); }
+  .spell-bad { color: var(--c-red); font-weight: 700; text-decoration: line-through; text-decoration-thickness: 2px; }
+</style>
+{% endblock %}
+
 {% block content %}
 {% csrf_token %}
 <style>
@@ -52,6 +76,24 @@
         <label class="flex items-center gap-2">
           <input type="radio" name="focusMode" value="random">
           <span>乱序背诵</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header">检测方式</div>
+      <div class="flex flex-col gap-2">
+        <label class="flex items-center gap-2">
+          <input type="radio" name="focusCheck" value="none" checked>
+          <span>纯背诵 <span class="text-secondary text-sm">（只看不写）</span></span>
+        </label>
+        <label class="flex items-center gap-2">
+          <input type="radio" name="focusCheck" value="spelling">
+          <span>拼写检测 <span class="text-secondary text-sm">（看中文默写英文）</span></span>
+        </label>
+        <label class="flex items-center gap-2">
+          <input type="radio" name="focusCheck" value="meaning">
+          <span>释义默写 <span class="text-secondary text-sm">（看英文写中文，AI 判定）</span></span>
         </label>
       </div>
     </div>
@@ -112,7 +154,6 @@
         <button class="btn btn-secondary btn-sm" onclick="replayFocusAudio()" title="发音"><i class="ph ph-speaker-high"></i> 发音</button>
         <button id="noteBtn" class="btn btn-secondary btn-sm" title="记笔记 / 查看笔记"><i class="ph ph-note-pencil"></i> 笔记</button>
         <button id="quickMemoryBtn" class="btn btn-secondary btn-sm" title="AI 速记 / 查看速记"><i class="ph ph-lightning"></i> 速记</button>
-        <button class="btn btn-secondary btn-sm" onclick="AssistantPanel.open()" title="问小助手"><i class="ph ph-chat-circle-text"></i> 小助手</button>
       </div>
       <div id="focusDetails" style="display: none;">
         <div class="word-phonetic" id="focusPhonetic" style="margin-bottom: 8px;"></div>
@@ -120,7 +161,15 @@
         <div class="word-meaning" id="focusMeaning"></div>
         <div class="word-example" id="focusExample" style="margin-top: 16px;"></div>
       </div>
-      <div class="text-secondary text-sm" style="margin-top: 24px;">点击卡片或按空格翻转</div>
+      <div id="focusCheckPanel" class="hidden" style="width: 100%; margin-top: 18px;">
+        <div class="text-secondary text-sm" id="focusCheckHint" style="margin-bottom: 8px;"></div>
+        <div style="display: flex; gap: 10px;">
+          <input type="text" id="focusCheckInput" class="check-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="在这里输入答案">
+          <button id="focusCheckSubmitBtn" class="btn btn-primary" style="min-width: 108px;">检查</button>
+        </div>
+        <div id="focusCheckResult" class="check-result"></div>
+      </div>
+      <div class="text-secondary text-sm" style="margin-top: 24px;" id="focusFlipHint">点击卡片或按空格翻转</div>
 
       <!-- 笔记 / 速记 展开区（共享组件） -->
       {% include '_word_ext_panel.html' %}
@@ -191,7 +240,9 @@ function focusUpdateSelected() {
 var focusWords = [];
 var focusIndex = 0;
 var focusMode = 'sequential';
+var focusCheck = 'none';
 var isFlipped = false;
+var focusChecked = false;
 var sessionStats = { total: 0, mastered: 0, unknown: 0 };
 var sessionCompleted = false;
 
@@ -202,6 +253,7 @@ function focusSaveState() {
       words: focusWords,
       index: focusIndex,
       mode: focusMode,
+      check: focusCheck,
       stats: sessionStats,
       completed: sessionCompleted
     }));
@@ -215,6 +267,7 @@ function focusRestoreState() {
     focusWords = s.words;
     focusIndex = s.index || 0;
     focusMode = s.mode || 'sequential';
+    focusCheck = s.check || 'none';
     sessionStats = s.stats || { total: 0, mastered: 0, unknown: 0 };
     sessionCompleted = !!s.completed;
     return true;
@@ -248,6 +301,9 @@ async function startFocus() {
   var mode = document.querySelector('input[name="focusMode"]:checked');
   if (!mode) { showToast('请选择背诵模式', 'error'); return; }
   focusMode = mode.value;
+
+  var check = document.querySelector('input[name="focusCheck"]:checked');
+  if (check) focusCheck = check.value;
 
   var unitCbs = document.querySelectorAll('.focus-unit-checkbox:checked');
   if (unitCbs.length === 0) { showToast('请至少选择一个单元', 'error'); return; }
@@ -297,14 +353,51 @@ function focusRender() {
   }
 
   var word = focusWords[focusIndex];
-  if (window.AssistantPanel) AssistantPanel.refreshCurrentWord();
   isFlipped = false;
+  focusChecked = false;
 
   // 切换单词时收起笔记/速记展开区
   if (window.WordExtPanel) WordExtPanel.closeExtPanel();
 
+  var cp = document.getElementById('focusCheckPanel');
+  var input = document.getElementById('focusCheckInput');
+  var submit = document.getElementById('focusCheckSubmitBtn');
+  var result = document.getElementById('focusCheckResult');
+  var details = document.getElementById('focusDetails');
+  var hint = document.getElementById('focusFlipHint');
+
+  result.className = 'check-result';
+  result.innerHTML = '';
+  input.value = '';
+  submit.disabled = false;
+  submit.textContent = '检查';
+
   document.getElementById('focusWord').textContent = word.word;
-  document.getElementById('focusDetails').style.display = 'none';
+  details.style.display = 'none';
+
+  if (focusCheck === 'spelling') {
+    // 看中文默写英文：直接显示释义，隐藏英文
+    document.getElementById('focusWord').textContent = '';
+    document.getElementById('focusPhonetic').textContent = '';
+    document.getElementById('focusPos').textContent = word.pos || '';
+    document.getElementById('focusMeaning').innerHTML = formatFocusMeanings(word);
+    details.style.display = 'block';
+    cp.classList.remove('hidden');
+    document.getElementById('focusCheckHint').textContent = '根据中文释义，默写英文单词：';
+    input.placeholder = '输入英文拼写';
+    hint.textContent = '按空格或点击卡片查看答案';
+    setTimeout(function () { input.focus(); }, 200);
+  } else if (focusCheck === 'meaning') {
+    // 看英文写中文：显示英文，隐藏释义
+    cp.classList.remove('hidden');
+    document.getElementById('focusCheckHint').textContent = '根据英文单词，写出中文意思：';
+    input.placeholder = '输入中文释义';
+    hint.textContent = '按空格或点击卡片查看答案';
+    setTimeout(function () { input.focus(); }, 200);
+  } else {
+    cp.classList.add('hidden');
+    hint.textContent = '点击卡片或按空格翻转';
+  }
 
   document.getElementById('focusCounter').textContent = (focusIndex + 1) + ' / ' + focusWords.length;
   document.getElementById('focusProgress').style.width = ((focusIndex) / focusWords.length * 100) + '%';
@@ -390,6 +483,28 @@ function focusFlip() {
 
   var word = focusWords[focusIndex];
   var details = document.getElementById('focusDetails');
+  var cp = document.getElementById('focusCheckPanel');
+
+  if (focusCheck !== 'none') {
+    // 检测模式：翻转 = 显示/收起答案
+    if (isFlipped) {
+      details.style.display = focusCheck === 'spelling' ? 'block' : 'none';
+      document.getElementById('focusWord').textContent = focusCheck === 'spelling' ? '' : word.word;
+      cp.classList.remove('hidden');
+      isFlipped = false;
+    } else {
+      document.getElementById('focusPhonetic').textContent = word.phonetic_us || '';
+      document.getElementById('focusPos').textContent = word.pos || '';
+      document.getElementById('focusMeaning').innerHTML = formatFocusMeanings(word);
+      document.getElementById('focusExample').textContent =
+        [word.example_en, word.example_zh].filter(Boolean).join('\n');
+      document.getElementById('focusWord').textContent = word.word;
+      details.style.display = 'block';
+      cp.classList.add('hidden');
+      isFlipped = true;
+    }
+    return;
+  }
 
   if (isFlipped) {
     details.style.display = 'none';
@@ -410,7 +525,7 @@ function focusFlip() {
 
 // ===== Mark Word =====
 async function focusMark(action) {
-  if (sessionCompleted || focusIndex >= focusWords.length) return;
+  if (sessionCompleted || focusIndex >= focusWords.length || focusChecked) return;
 
   var word = focusWords[focusIndex];
 
@@ -426,6 +541,79 @@ async function focusMark(action) {
     focusNext();
   } catch (e) {
     showToast('标记失败', 'error');
+  }
+}
+
+// ===== 检测判定 =====
+function focusHighlightDiff(user, correct) {
+  var u = user.toLowerCase(), c = correct.toLowerCase();
+  var p = 0;
+  while (p < u.length && p < c.length && u[p] === c[p]) p++;
+  var s = 0;
+  while (s < u.length - p && s < c.length - p && u[u.length - 1 - s] === c[c.length - 1 - s]) s++;
+  return '<div class="spell-line">你的输入：<span class="spell-ok">' + escapeHtml(user.substring(0, p)) +
+      '</span><span class="spell-bad">' + escapeHtml(user.substring(p, user.length - s)) +
+      '</span><span class="spell-ok">' + escapeHtml(user.substring(user.length - s)) + '</span></div>' +
+    '<div class="spell-line">正确拼写：<span class="spell-ok">' + escapeHtml(correct.substring(0, p)) +
+      '</span><span class="spell-bad">' + escapeHtml(correct.substring(p, correct.length - s)) +
+      '</span><span class="spell-ok">' + escapeHtml(correct.substring(correct.length - s)) + '</span></div>';
+}
+
+async function focusSubmitCheck() {
+  if (sessionCompleted || focusIndex >= focusWords.length || focusChecked) return;
+  var word = focusWords[focusIndex];
+  var input = document.getElementById('focusCheckInput');
+  var submit = document.getElementById('focusCheckSubmitBtn');
+  var answer = input.value.trim();
+  if (!answer) { showToast('请先输入答案', 'error'); return; }
+
+  submit.disabled = true;
+  var url = focusCheck === 'spelling'
+    ? '/api/spelling-check/' + word.id + '/'
+    : '/api/meaning-check/' + word.id + '/';
+  try {
+    var res = await VOCAB_API.post(url, { answer: answer });
+    if (!res || res.success === false || res.error) {
+      submit.disabled = false;
+      showToast((res && res.error) || '检测失败，请重试', 'error');
+      return;
+    }
+    focusChecked = true;
+    var ok = focusCheck === 'spelling' ? res.correct : (res.verdict === 'correct' || res.verdict === 'partial');
+    sessionStats.total++;
+    if (ok) sessionStats.mastered++;
+    else sessionStats.unknown++;
+    focusSaveState();
+
+    var resultEl = document.getElementById('focusCheckResult');
+    var title, cls, extra = '';
+    if (focusCheck === 'spelling') {
+      if (res.correct) {
+        cls = 'result-correct';
+        title = '拼写正确 ✓ 已标为「会」';
+      } else {
+        cls = 'result-wrong';
+        title = '拼写错误，已标为「不会」';
+        extra = focusHighlightDiff(answer, word.word);
+      }
+    } else {
+      if (res.verdict === 'correct' || res.verdict === 'partial') {
+        cls = 'result-correct';
+        title = res.verdict === 'partial' ? '释义大致正确 ✓ 已标为「会」' : '释义正确 ✓ 已标为「会」';
+      } else {
+        cls = 'result-wrong';
+        title = '释义不正确，已标为「不会」';
+      }
+      if (res.comment) extra = '<div class="check-comment">' + escapeHtml(res.comment) + '</div>';
+      if (!res.used_ai) extra += '<div><span class="check-flag">本地判定</span></div>';
+    }
+    resultEl.className = 'check-result ' + cls;
+    resultEl.innerHTML = '<div class="check-result-title">' + title + '</div>' + extra;
+    submit.textContent = '下一词';
+    if (res.auto_checked) showToast('今日已背诵 30 词，自动打卡成功！', 'success');
+  } catch (e) {
+    submit.disabled = false;
+    showToast('检测失败，请重试', 'error');
   }
 }
 
@@ -536,7 +724,7 @@ document.addEventListener('keydown', function (e) {
 document.getElementById('focusCard').addEventListener('click', function (e) {
   var t = e.target;
   if (t.tagName === 'BUTTON' || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'A' || t.tagName === 'SELECT') return;
-  if (t.closest && (t.closest('#wordExtPanel') || t.closest('#assistantPanel') || t.closest('#assistantBackdrop'))) return;
+  if (t.closest && (t.closest('#wordExtPanel') || t.closest('#assistantPanel'))) return;
   focusFlip();
 });
 
@@ -569,6 +757,23 @@ if (focusSliderEl) {
   });
   focusSliderEl.addEventListener('change', function () {
     delete this.dataset.dragging;
+  });
+}
+
+// ===== 检测输入绑定 =====
+var focusCheckSubmitBtn = document.getElementById('focusCheckSubmitBtn');
+var focusCheckInput = document.getElementById('focusCheckInput');
+if (focusCheckSubmitBtn) {
+  focusCheckSubmitBtn.addEventListener('click', function () {
+    if (focusChecked) focusNext(); else focusSubmitCheck();
+  });
+}
+if (focusCheckInput) {
+  focusCheckInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (focusChecked) focusNext(); else focusSubmitCheck();
+    }
   });
 }
 

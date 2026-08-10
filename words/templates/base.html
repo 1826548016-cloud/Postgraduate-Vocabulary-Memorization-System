@@ -11,6 +11,14 @@
   {% block extra_head %}{% endblock %}
 </head>
 <body>
+  <!--
+  THESIS: 把每天的复习变成“订正昨天的错”——现代克制的界面骨架 + 红笔批注的笔记本气质，拒绝扁平工具脸与过度装饰。
+  OWN-WORLD: 暖纸底 + 墨色文字 + 红笔红主强调；衬线标题、纸感卡片、红笔印章、蓝色圆珠笔次级强调；明暗双主题。
+  STORY: 用户打开仪表盘像翻开一页作业纸，任务进度是红笔填涂，坚持是印章。
+  FIRST VIEWPORT: 侧边墨色导航 + 暖纸仪表盘；衬线标语 + 连续打卡印章；红/蓝笔统计卡 + 红笔趋势图。
+  FORM: 错题本 × 现代稳妥融合（用户指定），seed 2c88a535。
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+  -->
   <div class="app-layout">
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
@@ -27,7 +35,7 @@
         <a href="{% url 'words:learn_start' %}" data-nav="learn">
           <i class="ph ph-target"></i> <span>背诵</span>
         </a>
-        <a href="{% url 'words:review_session' %}" data-nav="review">
+        <a href="{% url 'words:review_start' %}" data-nav="review">
           <i class="ph ph-arrows-clockwise"></i> <span>复习</span>
         </a>
         <a href="{% url 'words:weak_words' %}" data-nav="weak">
@@ -47,6 +55,9 @@
         </a>
         <a href="{% url 'words:exam' %}" data-nav="exam">
           <i class="ph ph-note-pencil"></i> <span>模拟考试</span>
+        </a>
+        <a href="{% url 'words:ai_chat_page' %}" data-nav="ai-chat">
+          <i class="ph ph-sparkle"></i> <span>AI 助手</span>
         </a>
         <a href="{% url 'words:settings_page' %}" data-nav="settings">
           <i class="ph ph-gear"></i> <span>设置</span>
@@ -105,6 +116,7 @@
     html.setAttribute('data-theme', next);
     localStorage.setItem('vocab-theme', next);
     icon.className = next === 'dark' ? 'ph ph-sun' : 'ph ph-moon';
+    window.dispatchEvent(new CustomEvent('vocab-theme-change', { detail: { theme: next } }));
   }
 
   // Sidebar active state

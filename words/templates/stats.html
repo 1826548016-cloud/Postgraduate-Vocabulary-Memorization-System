@@ -94,6 +94,88 @@
     </div>
   </div>
 </div>
+
+<!-- ===== 周学习报告 ===== -->
+<div class="card" style="margin-bottom: 24px;">
+  <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+    <div class="flex items-center gap-2">
+      <i class="ph ph-seal-check" style="color: var(--c-green); font-size: 1.3rem;"></i>
+      <div class="card-header" style="margin: 0;">学习周报</div>
+    </div>
+    <div class="flex gap-2" style="flex-wrap: wrap;">
+      <span id="reportStatus" class="text-secondary text-sm" style="align-self: center;">加载中…</span>
+      <button id="generateReportBtn" class="btn btn-primary" onclick="generateReport()" style="display: none;">
+        <i class="ph ph-sparkle"></i> 生成本周周报
+      </button>
+    </div>
+  </div>
+
+  <!-- 报告内容 -->
+  <div id="reportContent" class="hidden">
+    <!-- AI 评语 -->
+    <div style="background: var(--c-surface-2); border-left: 3px solid var(--c-green); border-radius: var(--radius-sm); padding: 16px 18px; margin-bottom: 16px;">
+      <div class="flex items-center gap-2" style="margin-bottom: 8px;">
+        <i class="ph ph-sparkle" style="color: var(--c-green);"></i>
+        <strong>AI 本周评语</strong>
+      </div>
+      <div id="reportComment" style="line-height: 1.9; white-space: pre-wrap;"></div>
+    </div>
+
+    <!-- 指标卡 -->
+    <div class="card-grid" style="margin-bottom: 16px;">
+      <div class="card stat-card">
+        <div class="stat-value" id="repNew">-</div>
+        <div class="stat-label">本周新学</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-value" id="repReview">-</div>
+        <div class="stat-label">本周复习</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-value" id="repDuration">-</div>
+        <div class="stat-label">本周学习时长</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-value" id="repRate">-</div>
+        <div class="stat-label">本周正确率</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-value" id="repMastery">-</div>
+        <div class="stat-label">掌握率</div>
+      </div>
+    </div>
+
+    <!-- 掌握总览 + 预测 -->
+    <div class="card-grid" style="margin-bottom: 16px;">
+      <div class="card">
+        <div class="card-header">词汇掌握总览</div>
+        <div id="repMasteryDetail" class="text-secondary text-sm" style="line-height: 2;"></div>
+      </div>
+      <div class="card">
+        <div class="card-header">完成度预测</div>
+        <div id="repForecast" class="text-secondary text-sm" style="line-height: 2;"></div>
+      </div>
+    </div>
+
+    <!-- 薄弱环节 -->
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-header">本周薄弱词 Top10</div>
+        <div id="repWeakWords" class="text-secondary text-sm"></div>
+      </div>
+      <div class="card">
+        <div class="card-header">陌生词性统计</div>
+        <div id="repWeakPos" class="text-secondary text-sm"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 历史报告 -->
+  <div id="reportHistoryWrap" class="hidden" style="margin-top: 20px; border-top: 1px solid var(--c-border); padding-top: 16px;">
+    <div class="card-header" style="margin-bottom: 10px;">历史周报</div>
+    <div id="reportHistory" class="text-secondary text-sm"></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -364,10 +446,142 @@ function exportPDF(type, dictationMode) {
   window.open('/api/export/pdf/?' + params.toString(), '_blank');
 }
 
+// ===== 学习周报 =====
+function formatStudyDurationSec(seconds) {
+  seconds = Math.max(0, Number(seconds) || 0);
+  var hours = Math.floor(seconds / 3600);
+  var minutes = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) return hours + ' 小时 ' + minutes + ' 分';
+  return minutes + ' 分钟';
+}
+
+function renderReportContent(summary, comment) {
+  document.getElementById('reportContent').classList.remove('hidden');
+  document.getElementById('reportComment').textContent = comment || '（暂无评语）';
+  document.getElementById('repNew').textContent = summary.new_words || 0;
+  document.getElementById('repReview').textContent = summary.reviewed_words || 0;
+  document.getElementById('repDuration').textContent = formatStudyDurationSec(summary.study_duration);
+  document.getElementById('repRate').textContent = (summary.correct_rate || 0) + '%';
+  document.getElementById('repMastery').textContent = (summary.mastery_rate || 0) + '%';
+
+  // 掌握总览
+  document.getElementById('repMasteryDetail').innerHTML =
+    '总词数：<strong>' + summary.total_words + '</strong> 词<br>' +
+    '已掌握：<strong>' + summary.mastered_words + '</strong> 词<br>' +
+    '学习中：<strong>' + summary.learning_words + '</strong> 词<br>' +
+    '未学习：<strong>' + summary.not_learned + '</strong> 词<br>' +
+    '永不忘记：<strong>' + summary.excluded_words + '</strong> 词';
+
+  // 完成度预测
+  var activeDays = summary.active_days || 0;
+  var bestDayText = summary.best_day ? summary.best_day : '—';
+  document.getElementById('repForecast').innerHTML =
+    '本周学习天数：<strong>' + activeDays + '</strong> 天' +
+    (summary.best_day ? '（最多的一天：<strong>' + bestDayText + '</strong>）' : '') + '<br>' +
+    '连续打卡：<strong>' + (summary.streak || 0) + '</strong> 天<br>' +
+    '每日新词目标：<strong>' + summary.daily_new_target + '</strong> 词<br>' +
+    '按当前速度，约还需 <strong>' + summary.days_to_finish + '</strong> 天背完全部单词<br>' +
+    '预计完成日期：<strong>' + summary.finish_date + '</strong>';
+
+  // 薄弱词
+  var weakHtml = '';
+  if (summary.weak_words && summary.weak_words.length > 0) {
+    weakHtml = '<table class="data-table"><thead><tr><th>#</th><th>单词</th><th>错误次数</th></tr></thead><tbody>';
+    summary.weak_words.forEach(function (w, i) {
+      weakHtml += '<tr><td>' + (i + 1) + '</td><td><strong>' + w.word + '</strong></td><td>' + w.error_count + '</td></tr>';
+    });
+    weakHtml += '</tbody></table>';
+  } else {
+    weakHtml = '<p class="text-secondary">本周没有易错词，表现很好！</p>';
+  }
+  document.getElementById('repWeakWords').innerHTML = weakHtml;
+
+  // 陌生词性
+  var posHtml = '';
+  if (summary.weak_pos && summary.weak_pos.length > 0) {
+    posHtml = '<table class="data-table"><thead><tr><th>词性</th><th>陌生次数</th></tr></thead><tbody>';
+    summary.weak_pos.forEach(function (p) {
+      posHtml += '<tr><td><strong>' + p.pos + '</strong></td><td>' + p.count + '</td></tr>';
+    });
+    posHtml += '</tbody></table>';
+  } else {
+    posHtml = '<p class="text-secondary">暂无陌生词性记录。</p>';
+  }
+  document.getElementById('repWeakPos').innerHTML = posHtml;
+}
+
+function renderReportHistory(history) {
+  var wrap = document.getElementById('reportHistoryWrap');
+  if (!history || history.length === 0) {
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+  var html = '';
+  history.forEach(function (r, i) {
+    html += '<div class="flex justify-between items-center" style="padding: 10px 0; border-bottom: 1px solid var(--c-border);">' +
+      '<span><strong>' + r.week_start + '</strong> ~ <strong>' + r.week_end + '</strong>　' +
+      '新学 ' + (r.summary.new_words || 0) + ' · 复习 ' + (r.summary.reviewed_words || 0) + ' · 掌握率 ' + (r.summary.mastery_rate || 0) + '%</span>' +
+      '<span class="text-secondary">' + r.created_at + '</span>' +
+      '</div>';
+  });
+  document.getElementById('reportHistory').innerHTML = html;
+}
+
+async function loadReport() {
+  try {
+    var res = await VOCAB_API.get('/api/learning-report/');
+    var statusEl = document.getElementById('reportStatus');
+    var btn = document.getElementById('generateReportBtn');
+    if (res.current) {
+      statusEl.textContent = '本周周报已生成（' + res.current.created_at + '）';
+      btn.textContent = '重新生成周报';
+      btn.style.display = 'inline-flex';
+      renderReportContent(res.current.summary, res.current.ai_comment);
+    } else {
+      statusEl.textContent = res.is_sunday ? '今天是周日，生成周报吧！' : '本周周报尚未生成';
+      btn.style.display = 'inline-flex';
+      document.getElementById('reportContent').classList.add('hidden');
+    }
+    renderReportHistory(res.history);
+  } catch (e) {
+    document.getElementById('reportStatus').textContent = '加载周报失败';
+  }
+}
+
+async function generateReport() {
+  var btn = document.getElementById('generateReportBtn');
+  var statusEl = document.getElementById('reportStatus');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ph ph-spinner ph-spin"></i> 生成中…';
+  statusEl.textContent = '正在调用 AI 生成评语，请稍候…';
+  try {
+    var res = await VOCAB_API.post('/api/learning-report/', {});
+    if (res.success) {
+      statusEl.textContent = '本周周报已生成（' + res.created_at + '）';
+      btn.innerHTML = '<i class="ph ph-sparkle"></i> 重新生成周报';
+      renderReportContent(res.summary, res.ai_comment);
+      showToast('周报生成成功', 'success');
+      loadReport();
+    } else {
+      statusEl.textContent = '';
+      btn.innerHTML = '<i class="ph ph-sparkle"></i> 生成本周周报';
+      showToast(res.error || '生成失败', 'error');
+    }
+  } catch (e) {
+    statusEl.textContent = '';
+    btn.innerHTML = '<i class="ph ph-sparkle"></i> 生成本周周报';
+    showToast(e.message || '生成失败', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // ===== Initial Load =====
 document.addEventListener('DOMContentLoaded', function () {
   applyPeriodUI();
   loadStats();
+  loadReport();
 });
 </script>
 {% endblock %}

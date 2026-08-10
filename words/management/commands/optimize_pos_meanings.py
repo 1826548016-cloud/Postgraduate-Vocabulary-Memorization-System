@@ -26,6 +26,7 @@ class Command(BaseCommand):
         parser.add_argument('--force', action='store_true', help='强制重新处理已有结果的单词')
         parser.add_argument('--batch-size', type=int, default=20, help='每批单词数')
         parser.add_argument('--start', type=int, default=0, help='跳过前 N 个（断点续跑）')
+        parser.add_argument('--unit', type=int, default=0, help='只处理指定单元编号的单词（0 = 全部）')
 
     def handle(self, *args, **opts):
         limit = opts['limit']
@@ -34,6 +35,8 @@ class Command(BaseCommand):
         start = opts['start']
 
         qs = Word.objects.all().order_by('id')
+        if opts['unit']:
+            qs = qs.filter(unit__number=opts['unit'])
         if not force:
             done_ids = set(Word.objects.exclude(meanings_by_pos='')
                            .exclude(meanings_by_pos='{}').values_list('id', flat=True))
