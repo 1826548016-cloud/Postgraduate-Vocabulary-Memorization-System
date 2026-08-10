@@ -13,7 +13,3 @@ media/
 # 其他
 *.log
 .DS_Store
-
-# 打包产物
-build/
-dist/

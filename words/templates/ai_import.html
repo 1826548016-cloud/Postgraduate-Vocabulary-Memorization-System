@@ -68,13 +68,13 @@
   <!-- 图片输入 -->
   <div id="aiSourceImage" class="ai-source-pane">
     <label class="ai-upload-box" id="aiUploadBox">
-      <input type="file" id="aiFileInput" accept="image/*" style="display:none;" onchange="handleAIFile(this)">
+      <input type="file" id="aiFileInput" accept="image/*" multiple style="display:none;" onchange="handleAIFile(this)">
       <div id="aiUploadHint" class="text-center text-secondary" style="padding: 20px;">
         <i class="ph ph-upload-simple" style="font-size: 28px;"></i><br>
-        点击上传图片（支持截图 / 拍照 / 词表图片）
+        点击上传图片（支持多张，可截图 / 拍照 / 词表图片）
       </div>
-      <img id="aiPreview" src="" alt="预览" style="display:none; max-height: 200px; margin: 0 auto;">
     </label>
+    <div id="aiImageList" class="hidden" style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px;"></div>
   </div>
 
   <!-- 纯文本输入 -->
@@ -150,6 +150,9 @@
   <!-- 复审操作区 -->
   <div class="ai-review-actions">
     <button class="btn btn-secondary btn-sm" id="aiReviewAIBtn" onclick="runAIReview()"><i class="ph ph-robot"></i> AI 复审</button>
+    <select id="aiReviewModelSelect" class="form-input" style="width: auto; min-width: 210px;" title="AI 复审使用的模型（默认跟随识别模型）">
+      <option value="">跟随识别模型（自动）</option>
+    </select>
     <button class="btn btn-secondary btn-sm" id="aiReviewHumanBtn" onclick="markHumanReview()"><i class="ph ph-user-check"></i> 人工复审</button>
     <button class="btn btn-secondary btn-sm" id="aiReviewSampleBtn" onclick="startRandomReview()"><i class="ph ph-shuffle"></i> 随机抽审</button>
   </div>
@@ -239,7 +242,7 @@
   var AI_SETTINGS_URL = "{% url 'words:settings_page' %}#ai-models";
   var aiModels = [];               // 从后端加载的模型列表
   var aiSource = 'image';        // 当前输入源: image / text / file
-  var aiImageB64 = '';           // 图片 base64（不含 data: 前缀）
+  var aiImages = [];             // 多张图片: [{name, dataUrl}]
   var aiFileContent = '';        // 文本文件内容
   var aiFileName = '';
   var aiReviewState = { ai: false, human: false, sample: false };  // 三级复审状态
@@ -520,10 +523,34 @@
       if (lastId && enabled.some(function (m) { return String(m.id) === String(lastId); })) sel.value = lastId;
     }
     onAIModelSelectChange();
+    refreshAIReviewModelSelect();
   }
 
   function getSelectedAIModel() {
     var sel = document.getElementById('aiModelSelect');
+    return aiModels.find(function (m) { return String(m.id) === String(sel.value); }) || null;
+  }
+
+  function refreshAIReviewModelSelect() {
+    var sel = document.getElementById('aiReviewModelSelect');
+    if (!sel) return;
+    var lastId = sel.value;
+    var enabled = aiModels.filter(function (m) { return m.enabled; });
+    sel.innerHTML = '<option value="">跟随识别模型（自动）</option>';
+    enabled.forEach(function (m) {
+      var opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = (m.display_name || m.model_id) + (isVisionModel(m) ? ' · 视觉' : ' · 文本模式');
+      sel.appendChild(opt);
+    });
+    if (lastId && enabled.some(function (m) { return String(m.id) === String(lastId); })) {
+      sel.value = lastId;
+    }
+  }
+
+  function getSelectedAIReviewModel() {
+    var sel = document.getElementById('aiReviewModelSelect');
+    if (!sel || !sel.value) return null;
     return aiModels.find(function (m) { return String(m.id) === String(sel.value); }) || null;
   }
 
@@ -542,21 +569,76 @@
   // 模型管理已迁移至「设置 → AI 模型」，本页仅保留模型选择
 
   function handleAIFile(input) {
-    var file = input.files && input.files[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) { showToast('请选择图片文件', 'error'); return; }
-    var reader = new FileReader();
-    reader.onload = function (e) {
-      // 压缩图片，避免超长请求
-      compressImage(e.target.result, function (dataUrl) {
-        aiImageB64 = dataUrl.split(',')[1] || '';
-        document.getElementById('aiUploadHint').style.display = 'none';
-        var preview = document.getElementById('aiPreview');
-        preview.src = dataUrl;
-        preview.style.display = 'block';
-      });
-    };
-    reader.readAsDataURL(file);
+    var files = input.files || [];
+    if (files.length === 0) return;
+
+    var pending = [];
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i];
+      if (!file.type.startsWith('image/')) {
+        showToast('「' + file.name + '」不是图片文件，已跳过', 'error');
+        continue;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        showToast('「' + file.name + '」超过 10MB，请压缩后上传', 'error');
+        continue;
+      }
+      pending.push(file);
+    }
+    if (pending.length === 0) return;
+
+    var readIndex = 0;
+    function readNext() {
+      if (readIndex >= pending.length) {
+        input.value = '';
+        renderAIImages();
+        return;
+      }
+      var f = pending[readIndex];
+      var reader = new FileReader();
+      reader.onload = function (e) {
+        // 压缩图片，避免超长请求
+        compressImage(e.target.result, function (dataUrl) {
+          aiImages.push({ name: f.name, dataUrl: dataUrl });
+          readIndex++;
+          readNext();
+        });
+      };
+      reader.onerror = function () {
+        readIndex++;
+        readNext();
+      };
+      reader.readAsDataURL(f);
+    }
+    readNext();
+  }
+
+  // 渲染已选图片缩略图
+  function renderAIImages() {
+    var list = document.getElementById('aiImageList');
+    var hint = document.getElementById('aiUploadHint');
+    if (!list) return;
+    if (aiImages.length === 0) {
+      list.classList.add('hidden');
+      list.innerHTML = '';
+      if (hint) hint.style.display = '';
+      return;
+    }
+    list.classList.remove('hidden');
+    list.innerHTML = aiImages.map(function (img, idx) {
+      return '<div style="position: relative; text-align: center;">' +
+        '<img src="' + img.dataUrl + '" style="width: 104px; height: 78px; object-fit: cover; border-radius: 8px; border: 1px solid var(--c-border); box-shadow: var(--shadow);" title="' + escapeHtml(img.name) + '">' +
+        '<button type="button" onclick="removeAIImage(' + idx + ')" title="移除这张图片" style="position: absolute; top: -8px; right: -8px; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--c-border); background: var(--c-surface); color: var(--c-red); cursor: pointer; font-weight: 700; line-height: 1; box-shadow: var(--shadow);">×</button>' +
+        '<div class="text-sm text-secondary" style="max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 4px;">' + escapeHtml(img.name) + '</div>' +
+      '</div>';
+    }).join('');
+    if (hint) hint.style.display = 'none';
+  }
+
+  // 移除一张已选图片
+  function removeAIImage(idx) {
+    aiImages.splice(idx, 1);
+    renderAIImages();
   }
 
   // 上传文本文件（.txt / .md / .csv），读取内容交给 AI 整理
@@ -612,19 +694,27 @@
       var words = [];
 
       if (aiSource === 'image') {
-        // ===== 图片识别：单次调用 + 分阶段进度提示 =====
-        if (!aiImageB64) { showToast('请先上传图片', 'error'); return; }
+        // ===== 图片识别：支持多张，逐张调用 + 进度提示 =====
+        if (aiImages.length === 0) { showToast('请先上传图片', 'error'); return; }
         if (!isVisionModel(model)) {
           showToast('「' + (model.display_name || model.model_id) + '」不支持图片识别，请切换到「纯文本」或「文件」方式，或在「设置 → AI 模型」中选择带（视觉）标记的模型', 'error');
           return;
         }
-        setAIProgress(0, 3, '正在上传图片…');
-        appendAILog('正在发送图片到 AI…');
-        setAIProgress(1, 3, 'AI 正在识别图片中的单词…');
-        var res = await VOCAB_API.post('/api/ai/recognize/', { model_id: model.id, image: aiImageB64 });
-        if (!res.words) throw { error: res.error || '识别失败' };
-        words = res.words;
-        setAIProgress(3, 3, '识别完成');
+        var totalImgs = aiImages.length;
+        var allWords = [];
+        for (var imgIdx = 0; imgIdx < totalImgs; imgIdx++) {
+          setAIProgress(imgIdx, totalImgs, '正在识别第 ' + (imgIdx + 1) + '/' + totalImgs + ' 张图片…');
+          appendAILog('正在识别第 ' + (imgIdx + 1) + '/' + totalImgs + ' 张图片（' + (aiImages[imgIdx].name || '') + '）…');
+          var res = await VOCAB_API.post('/api/ai/recognize/', {
+            model_id: model.id,
+            image: aiImages[imgIdx].dataUrl.split(',')[1] || '',
+          });
+          if (!res.words) throw { error: (res && res.error) || ('识别第 ' + (imgIdx + 1) + ' 张图片失败') };
+          allWords = allWords.concat(res.words);
+          appendAILog('第 ' + (imgIdx + 1) + ' 张识别到 ' + res.words.length + ' 个单词');
+        }
+        words = allWords;
+        setAIProgress(totalImgs, totalImgs, '识别完成');
 
       } else {
         // ===== 文本/文件识别：分批调用 + 真实进度条 =====
@@ -857,7 +947,7 @@
   var AI_REVIEW_BATCH = 20;  // 每批复审的单词数（数据量大时分批，避免单次请求超时）
 
   async function runAIReview() {
-    var model = getSelectedAIModel();
+    var model = getSelectedAIReviewModel() || getSelectedAIModel();
     if (!model) { showToast('尚未配置可用模型，请先到「设置 → AI 模型」中添加并启用', 'error'); return; }
     if (aiWords.length === 0) { showToast('没有可复审的单词', 'error'); return; }
 
@@ -1145,7 +1235,7 @@
         source: aiSource || 'text',
       });
       if (res.success) {
-        appendAILog('导入完成：成功 ' + res.imported + ' 个' + (res.skipped ? '，跳过重复 ' + res.skipped + ' 个' : ''), 'c-green');
+        appendAILog('导入完成：成功 ' + res.imported + ' 个' + (res.skipped ? '，跳过重复 ' + res.skipped + ' 个' : '') + (res.completing ? '（AI 补全释义/例句将在后台自动进行，稍后可在词库查看）' : ''), 'c-green');
         showToast('成功导入 ' + res.imported + ' 个单词' + (res.skipped ? '（跳过重复 ' + res.skipped + ' 个）' : ''), 'success');
         // 导入成功，清除草稿
         clearAIDraft();

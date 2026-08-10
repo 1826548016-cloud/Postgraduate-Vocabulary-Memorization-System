@@ -59,6 +59,7 @@
       <button class="vocab-nav-item active" id="allWordsButton" onclick="resetWordFilters()"><span><i class="ph ph-books"></i> 全部单词</span><span class="vocab-nav-count" id="allWordsCount">—</span></button>
       <button class="vocab-nav-item" onclick="setStatusFilter('mastered')"><span><i class="ph ph-check-circle"></i> 已掌握</span></button>
       <button class="vocab-nav-item" onclick="setStatusFilter('unknown')"><span><i class="ph ph-arrow-clockwise"></i> 待学习</span></button>
+      <button class="vocab-nav-item" onclick="setStatusFilter('excluded')"><span><i class="ph ph-check-fat"></i> 永不忘记</span><span class="vocab-nav-count" id="excludedCount">—</span></button>
       <div class="flex justify-between items-center" style="margin: 18px 10px 8px;">
         <span class="text-sm text-secondary">单元（{{ units|length }}）</span>
       </div>
@@ -83,54 +84,6 @@
         {% endfor %}
       </div>
 
-      <!-- Create unit form -->
-      <div id="createUnitForm" class="hidden" style="margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);">
-        <div class="form-group">
-          <label class="form-label">单元编号</label>
-          <input type="number" class="form-input" id="newUnitNumber" placeholder="如 5" min="1">
-        </div>
-        <div class="form-group">
-          <label class="form-label">单元名称</label>
-          <input type="text" class="form-input" id="newUnitName" placeholder="如 List 5">
-        </div>
-        <div class="form-group">
-          <label class="form-label">词汇类别</label>
-          <select class="form-input" id="newUnitCategory" onchange="toggleCustomCategory('newUnitCategory', 'newUnitCategoryCustom')">
-            <option value="required">必考词</option>
-            <option value="basic">基础词</option>
-            <option value="advanced">超纲词</option>
-            <option value="__custom__">自定义…</option>
-          </select>
-          <input type="text" class="form-input hidden" id="newUnitCategoryCustom" placeholder="输入自定义词汇类别" maxlength="20" style="margin-top: 6px;">
-        </div>
-        <div class="flex gap-2">
-          <button class="btn btn-primary btn-sm" onclick="createUnit()">创建</button>
-          <button class="btn btn-secondary btn-sm" onclick="hideCreateUnit()">取消</button>
-        </div>
-      </div>
-
-      <!-- Edit unit form -->
-      <div id="editUnitForm" class="hidden" style="margin-top: 12px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius-sm);">
-        <div class="text-sm text-secondary" style="margin-bottom: 8px;">编辑单元 <strong id="editUnitNumber"></strong></div>
-        <div class="form-group">
-          <label class="form-label">单元名称</label>
-          <input type="text" class="form-input" id="editUnitName">
-        </div>
-        <div class="form-group">
-          <label class="form-label">词汇类别</label>
-          <select class="form-input" id="editUnitCategory" onchange="toggleCustomCategory('editUnitCategory', 'editUnitCategoryCustom')">
-            <option value="required">必考词</option>
-            <option value="basic">基础词</option>
-            <option value="advanced">超纲词</option>
-            <option value="__custom__">自定义…</option>
-          </select>
-          <input type="text" class="form-input hidden" id="editUnitCategoryCustom" placeholder="输入自定义词汇类别" maxlength="20" style="margin-top: 6px;">
-        </div>
-        <div class="flex gap-2">
-          <button class="btn btn-primary btn-sm" onclick="updateUnit()">保存</button>
-          <button class="btn btn-secondary btn-sm" onclick="hideEditUnit()">取消</button>
-        </div>
-      </div>
     </div>
   </aside>
 
@@ -180,6 +133,7 @@
           <option value="">全部状态</option>
           <option value="mastered">会</option>
           <option value="unknown">不会</option>
+          <option value="excluded">已排除（永不忘记）</option>
         </select>
         <select id="sortFilter" class="form-input">
           <option value="">默认排序</option>
@@ -191,7 +145,7 @@
 
     <!-- Word table -->
     <div class="card">
-      <div class="vocab-summary"><strong>单词列表</strong><span id="wordListSummary">加载中…</span><span style="flex: 1;"></span><button class="quick-filter" onclick="setStatusFilter('')">全部</button><button class="quick-filter" onclick="setStatusFilter('unknown')">待学习</button><button class="quick-filter" onclick="setStatusFilter('mastered')">已掌握</button></div>
+      <div class="vocab-summary"><strong>单词列表</strong><span id="wordListSummary">加载中…</span><span style="flex: 1;"></span><button class="quick-filter" onclick="setStatusFilter('')">全部</button><button class="quick-filter" onclick="setStatusFilter('unknown')">待学习</button><button class="quick-filter" onclick="setStatusFilter('mastered')">已掌握</button><button class="quick-filter" onclick="setStatusFilter('excluded')">已排除</button></div>
       <div style="overflow-x: auto;">
         <table class="data-table vocab-table">
           <thead>
@@ -288,12 +242,19 @@
     <div class="grid grid-2">
       <div class="form-group">
         <label class="form-label">所属单元</label>
-        <select id="wmUnit" class="form-input" onchange="toggleNewUnitFields('wm')">
+        <div style="display: flex; gap: 8px;">
+        <select id="wmUnit" class="form-input" style="flex: 1; min-width: 0;" onchange="toggleNewUnitFields('wm')">
           {% for unit in units %}
           <option value="{{ unit.number }}">{{ unit.name }}</option>
-          {% endfor %}
+          {% if forloop.first %}
           <option value="new">➕ 新建单元…</option>
+          {% endif %}
+          {% empty %}
+          <option value="new" selected>➕ 新建单元…</option>
+          {% endfor %}
         </select>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="quickNewUnit('wm')" title="直接新建一个单元" style="white-space: nowrap;"><i class="ph ph-plus"></i> 新建单元</button>
+        </div>
         <div id="wmNewUnitFields" class="hidden grid grid-2" style="margin-top: 8px; gap: 8px;">
           <input type="number" id="wmNewUnitNumber" class="form-input" placeholder="新单元编号" min="1">
           <input type="text" id="wmNewUnitName" class="form-input" placeholder="单元名称（如 List 6）">
@@ -308,6 +269,42 @@
     <div class="flex gap-2 justify-end" style="margin-top: 8px;">
       <button class="btn btn-secondary" onclick="closeWordModal()">取消</button>
       <button class="btn btn-primary" onclick="submitWordModal()"><i class="ph ph-check"></i> 保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 单元弹窗（新增 / 编辑共用） -->
+<div id="unitModal" class="modal-overlay hidden" onclick="if (event.target === this) hideUnitModal()">
+  <div class="modal" style="max-width: 440px;">
+    <div class="flex justify-between items-center" style="margin-bottom: 16px;">
+      <h3 id="unitModalTitle" style="margin: 0; font-size: var(--fs-lg);"><i class="ph ph-stack" style="color: var(--c-green);"></i> 新增单元</h3>
+      <button class="btn btn-ghost" onclick="hideUnitModal()" title="关闭"><i class="ph ph-x"></i></button>
+    </div>
+
+    <input type="hidden" id="unitModalEditNumber" value="">
+
+    <div class="form-group">
+      <label class="form-label">单元编号 <span class="text-secondary text-sm">（编辑时不可修改）</span></label>
+      <input type="number" class="form-input" id="newUnitNumber" placeholder="如 5" min="1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">单元名称</label>
+      <input type="text" class="form-input" id="newUnitName" placeholder="如 List 5">
+    </div>
+    <div class="form-group">
+      <label class="form-label">词汇类别</label>
+      <select class="form-input" id="newUnitCategory" onchange="toggleCustomCategory('newUnitCategory', 'newUnitCategoryCustom')">
+        <option value="required">必考词</option>
+        <option value="basic">基础词</option>
+        <option value="advanced">超纲词</option>
+        <option value="__custom__">自定义…</option>
+      </select>
+      <input type="text" class="form-input hidden" id="newUnitCategoryCustom" placeholder="输入自定义词汇类别" maxlength="20" style="margin-top: 6px;">
+    </div>
+
+    <div class="flex gap-2 justify-end" style="margin-top: 8px;">
+      <button class="btn btn-secondary" onclick="hideUnitModal()">取消</button>
+      <button class="btn btn-primary" id="unitModalSubmitBtn" onclick="submitUnitModal()"><i class="ph ph-check"></i> 创建</button>
     </div>
   </div>
 </div>
@@ -395,6 +392,7 @@
       renderWords(data);
       renderPagination(data.total, data.page);
       document.getElementById('allWordsCount').textContent = data.total;
+      document.getElementById('excludedCount').textContent = data.total_excluded || 0;
       document.getElementById('wordListSummary').textContent = '共 ' + data.total + ' 词 · 当前显示 ' + (data.words || []).length + ' 词';
     } catch (e) {
       showToast('加载单词失败', 'error');
@@ -433,10 +431,19 @@
         '<td>' + (startIndex + i) + '</td>' +
         '<td class="word-cell"><a href="' + detailUrl + '">' + wordText + '</a><span class="word-phonetic">' + escapeHtml(phonetic) + '</span></td>' +
         '<td class="meaning-cell">' + meanings + '</td>' +
-        '<td><span class="badge ' + getStatusBadgeClass(w.status) + '">' + getStatusLabel(w.status) + '</span></td>' +
+        '<td>' +
+          (w.is_excluded
+            ? '<span class="badge" style="background: var(--c-purple, #8a6f9e); color: #fff;">永不忘记</span>'
+            : '<span class="badge ' + getStatusBadgeClass(w.status) + '">' + getStatusLabel(w.status) + '</span>'
+          ) +
+        '</td>' +
         '<td><details class="word-actions"><summary title="单词操作"><i class="ph ph-dots-three"></i></summary><div class="word-action-menu">' +
           '<a href="' + detailUrl + '">查看详情</a>' +
           '<button onclick="toggleWordMastery(' + w.id + ', this)">' + (w.status === 'mastered' ? '标记为待学习' : '标记为已掌握') + '</button>' +
+          (w.is_excluded
+            ? '<button onclick="toggleWordExcluded(' + w.id + ', false, this)">恢复（不再永不忘记）</button>'
+            : '<button onclick="toggleWordExcluded(' + w.id + ', true, this)">标记永不忘记</button>'
+          ) +
           '<button onclick="openWordModal(\'edit\', ' + w.id + ')">编辑单词</button>' +
           '<button class="favorite-btn" data-id="' + w.id + '" onclick="toggleFavorite(' + w.id + ', this)">' + (w.is_favorite ? '取消收藏' : '收藏单词') + '</button>' +
           '<button class="danger" onclick="deleteWord(' + w.id + ', \'' + escapeJsString(w.word) + '\')">删除单词</button>' +
@@ -531,6 +538,12 @@
 
   function setStatusFilter(status) {
     document.getElementById('statusFilter').value = status;
+    // 更新侧边栏按钮高亮
+    document.querySelectorAll('.vocab-nav-item').forEach(function (btn) { btn.classList.remove('active'); });
+    var map = { 'mastered': 1, 'unknown': 2, 'excluded': 3 };
+    var idx = map[status] || 0;
+    var buttons = document.querySelectorAll('.vocab-nav-item');
+    if (buttons[idx]) buttons[idx].classList.add('active');
     loadWords(1);
   }
 
@@ -573,6 +586,23 @@
           showToast('已标记为"不会"', 'success');
         }
         // Reload to update the badge
+        loadWords(currentPage);
+      } else {
+        showToast(res.error || '操作失败', 'error');
+      }
+    } catch (e) {
+      showToast('请求失败', 'error');
+    }
+  }
+
+  async function toggleWordExcluded(wordId, exclude, btn) {
+    var action = exclude ? 'skip' : 'unskip';
+    var confirmMsg = exclude ? '标记此词为「永不忘记」？之后它将不再出现在背诵/复习中。' : '恢复此词？之后它将重新出现在背诵/复习中。';
+    if (!confirm(confirmMsg)) return;
+    try {
+      var res = await VOCAB_API.post('/api/mark/' + action + '/' + wordId + '/', {});
+      if (res.success) {
+        showToast(exclude ? '已标记为永不忘记' : '已恢复', 'success');
         loadWords(currentPage);
       } else {
         showToast(res.error || '操作失败', 'error');
@@ -663,6 +693,15 @@
   function toggleNewUnitFields(prefix) {
     var fields = document.getElementById(prefix + 'NewUnitFields');
     fields.classList.toggle('hidden', document.getElementById(prefix + 'Unit').value !== 'new');
+  }
+
+  // 一键新建单元：选中「新建单元」并聚焦编号输入框
+  function quickNewUnit(prefix) {
+    var sel = document.getElementById(prefix + 'Unit');
+    if (sel) sel.value = 'new';
+    toggleNewUnitFields(prefix);
+    var num = document.getElementById(prefix + 'NewUnitNumber');
+    if (num) num.focus();
   }
 
   // 解析单元选择：普通单元返回编号，新建单元返回输入框中的编号+名称
@@ -1085,36 +1124,52 @@
     return sel.value;
   }
 
-  function showCreateUnit() {
-    hideEditUnit();
-    document.getElementById('createUnitForm').classList.remove('hidden');
-  }
-
-  function hideCreateUnit() {
-    document.getElementById('createUnitForm').classList.add('hidden');
-    document.getElementById('newUnitNumber').value = '';
-    document.getElementById('newUnitName').value = '';
+  // 单元弹窗（新增 / 编辑共用）：新增时编号可填，编辑时编号锁定
+  function openUnitModal(mode, unitNumber, unitName, category) {
+    hideUnitModal();
+    var title = document.getElementById('unitModalTitle');
+    var submitBtn = document.getElementById('unitModalSubmitBtn');
+    document.getElementById('newUnitNumber').disabled = false;
+    document.getElementById('newUnitNumber').value = unitNumber || '';
+    document.getElementById('newUnitName').value = unitName || '';
     document.getElementById('newUnitCategory').value = 'required';
     document.getElementById('newUnitCategoryCustom').value = '';
     document.getElementById('newUnitCategoryCustom').classList.add('hidden');
+    if (mode === 'edit') {
+      title.innerHTML = '<i class="ph ph-pencil-simple" style="color: var(--c-green);"></i> 编辑单元';
+      submitBtn.innerHTML = '<i class="ph ph-check"></i> 保存';
+      document.getElementById('unitModalEditNumber').value = unitNumber;
+      document.getElementById('newUnitNumber').disabled = true;
+      var isPreset = ['required', 'basic', 'advanced'].indexOf(category) !== -1;
+      document.getElementById('newUnitCategory').value = isPreset ? category : '__custom__';
+      document.getElementById('newUnitCategoryCustom').value = isPreset ? '' : category;
+      document.getElementById('newUnitCategoryCustom').classList.toggle('hidden', isPreset);
+    } else {
+      title.innerHTML = '<i class="ph ph-stack" style="color: var(--c-green);"></i> 新增单元';
+      submitBtn.innerHTML = '<i class="ph ph-check"></i> 创建';
+      document.getElementById('unitModalEditNumber').value = '';
+    }
+    document.getElementById('unitModal').classList.remove('hidden');
+  }
+
+  function hideUnitModal() {
+    document.getElementById('unitModal').classList.add('hidden');
+  }
+
+  function showCreateUnit() {
+    openUnitModal('create');
   }
 
   function showEditUnit(number, name, category) {
-    hideCreateUnit();
-    document.getElementById('editUnitNumber').textContent = number;
-    document.getElementById('editUnitName').value = name;
-    var sel = document.getElementById('editUnitCategory');
-    var custom = document.getElementById('editUnitCategoryCustom');
-    var isPreset = ['required', 'basic', 'advanced'].indexOf(category) !== -1;
-    sel.value = isPreset ? category : '__custom__';
-    custom.value = isPreset ? '' : category;
-    custom.classList.toggle('hidden', isPreset);
-    document.getElementById('editUnitForm').dataset.unitNumber = number;
-    document.getElementById('editUnitForm').classList.remove('hidden');
+    openUnitModal('edit', number, name, category);
   }
 
-  function hideEditUnit() {
-    document.getElementById('editUnitForm').classList.add('hidden');
+  function submitUnitModal() {
+    if (document.getElementById('unitModalEditNumber').value) {
+      updateUnit();
+    } else {
+      createUnit();
+    }
   }
 
   async function createUnit() {
@@ -1139,7 +1194,7 @@
       });
       if (res.success) {
         showToast('单元创建成功', 'success');
-        hideCreateUnit();
+        hideUnitModal();
         setTimeout(function () { window.location.reload(); }, 500);
       } else {
         showToast(res.error || '创建失败', 'error');
@@ -1150,9 +1205,9 @@
   }
 
   async function updateUnit() {
-    var number = parseInt(document.getElementById('editUnitForm').dataset.unitNumber);
-    var name = document.getElementById('editUnitName').value.trim();
-    var category = resolveCategory('editUnitCategory', 'editUnitCategoryCustom');
+    var number = parseInt(document.getElementById('unitModalEditNumber').value);
+    var name = document.getElementById('newUnitName').value.trim();
+    var category = resolveCategory('newUnitCategory', 'newUnitCategoryCustom');
 
     if (!name) {
       showToast('单元名称不能为空', 'error');
@@ -1170,7 +1225,7 @@
       });
       if (res.success) {
         showToast('单元信息已更新', 'success');
-        hideEditUnit();
+        hideUnitModal();
         setTimeout(function () { window.location.reload(); }, 500);
       } else {
         showToast(res.error || '更新失败', 'error');

@@ -1,22 +1,11 @@
 // ===== 小助手共享组件（背诵/专注/复习共用，对话历史互通并持久化） =====
 window.AssistantPanel = (function () {
-  'use strict';
-
   var cfg = { aiSettingsUrl: '/settings/#ai-models', getCurrentWord: null };
-  var CACHE_KEY = 'vocab-assistant-cache-v1';
   var sending = false;
-  var confirmingClear = false;
-  var clearTimer = null;
-  var slowTimer = null;
-  var errTimer = null;
 
   function el(id) { return document.getElementById(id); }
   function panel() { return el('assistantPanel'); }
-  function backdrop() { return el('assistantBackdrop'); }
-  function isOpen() {
-    var p = panel();
-    return !!p && p.classList.contains('open');
-  }
+  function isOpen() { var p = panel(); return !!p && !p.classList.contains('hidden'); }
 
   function init(options) {
     cfg = Object.assign(cfg, options || {});
@@ -29,65 +18,14 @@ window.AssistantPanel = (function () {
         }
       });
     }
-    var fab = el('assistantFab');
-    if (fab) fab.addEventListener('click', toggle);
-    var closeBtn = el('assistantCloseBtn');
-    if (closeBtn) closeBtn.addEventListener('click', close);
-    var bd = backdrop();
-    if (bd) bd.addEventListener('click', close);
-    var clearBtn = el('assistantClearBtn');
-    if (clearBtn) clearBtn.addEventListener('click', clearHistory);
-    var chips = el('assistantChips');
-    if (chips) {
-      chips.addEventListener('click', function (e) {
-        var btn = e.target && e.target.closest ? e.target.closest('.assistant-chip') : null;
-        if (btn) ask(btn.getAttribute('data-prompt') || '');
-      });
-    }
-    var err = el('assistantError');
-    if (err) err.addEventListener('click', hideError);
-  }
-
-  // 代码块复制按钮（事件委托）
-  document.addEventListener('click', function (e) {
-    var btn = e.target && e.target.closest ? e.target.closest('.assistant-copy-btn') : null;
-    if (!btn) return;
-    var pre = btn.parentElement && btn.parentElement.nextElementSibling;
-    var text = pre ? pre.textContent : '';
-    copyText(text).then(function () {
-      btn.textContent = '已复制';
-      setTimeout(function () { btn.textContent = '复制'; }, 1600);
-    });
-  });
-
-  function copyText(text) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(text);
-    }
-    return new Promise(function (resolve) {
-      var ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); } catch (e) {}
-      document.body.removeChild(ta);
-      resolve();
-    });
   }
 
   function toggle() { if (isOpen()) close(); else open(); }
 
   function open() {
     var p = panel();
-    if (!p || isOpen()) return;
+    if (!p) return;
     p.classList.remove('hidden');
-    void p.offsetWidth; // 触发回流以播放动画
-    p.classList.add('open');
-    var bd = backdrop();
-    if (bd) bd.classList.add('open');
-    refreshCurrentWord();
     loadHistory();
     var input = el('assistantInput');
     if (input) input.focus();
@@ -95,12 +33,7 @@ window.AssistantPanel = (function () {
 
   function close() {
     var p = panel();
-    if (!p) return;
-    p.classList.remove('open');
-    var bd = backdrop();
-    if (bd) bd.classList.remove('open');
-    clearTimeout(slowTimer);
-    setTimeout(function () { if (!isOpen()) p.classList.add('hidden'); }, 280);
+    if (p) p.classList.add('hidden');
   }
 
   function setBody(html) {
@@ -108,80 +41,33 @@ window.AssistantPanel = (function () {
     if (body) body.innerHTML = html;
   }
 
-  function emptyHtml() {
-    return '<div class="assistant-empty"><i class="ph ph-chat-circle-text"></i>你好，我是你的智能助手！<br>单词考法、近义辨析、例句仿写都可以问我。</div>';
-  }
-
-  // 每次打开先展示本地缓存，再静默刷新，保证历史最新（三个模式互通）
+  // 每次打开都从服务端拉取，保证历史最新（三个模式互通）
   function loadHistory() {
-    var cached = loadCache();
-    if (cached && cached.length) {
-      renderMessages(cached);
-    } else {
-      setBody(emptyHtml());
-    }
+    setBody('<div class="assistant-empty">加载对话记录…</div>');
     VOCAB_API.get('/api/assistant/').then(function (res) {
-      var msgs = (res && res.messages) || [];
-      renderMessages(msgs);
-      saveCache(msgs);
+      renderMessages((res && res.messages) || []);
     }).catch(function () {
-      if (!cached || !cached.length) showError('加载对话记录失败，请稍后重试');
+      setBody('<div class="assistant-empty">加载对话记录失败</div>');
     });
   }
 
   function renderMessages(msgs) {
     if (!msgs || !msgs.length) {
-      setBody(emptyHtml());
+      setBody('<div class="assistant-empty">你好，我是你的智能助手！<br>随便问我什么都可以：单词考法、学习规划、日常聊天、编程问题…</div>');
       return;
     }
     var html = '';
-    var lastDate = null;
-    msgs.forEach(function (m) {
-      var d = m.created_at ? m.created_at.slice(0, 10) : null;
-      if (d && d !== lastDate) {
-        html += dateDividerHtml(dateLabel(m.created_at));
-        lastDate = d;
-      }
-      html += bubbleHtml(m.role, m.content, m.created_at);
-    });
+    msgs.forEach(function (m) { html += bubbleHtml(m.role, m.content, m.created_at); });
     setBody(html);
     scrollBottom();
   }
 
   function bubbleHtml(role, content, time) {
-    var isUser = role === 'user';
-    var body = isUser ? escapeHtml(content) : renderMarkdown(content);
-    var icon = isUser ? 'ph-user' : 'ph-chat-circle-text';
-    return '<div class="assistant-msg ' + (isUser ? 'user' : 'ai') +
-      '" data-date="' + (time ? time.slice(0, 10) : '') + '">' +
-      '<div class="assistant-avatar-sm ' + (isUser ? 'user' : 'ai') + '"><i class="ph ' + icon + '"></i></div>' +
-      '<div class="assistant-bubble">' + body +
-      (time ? '<span class="assistant-msg-time">' + time.slice(11) + '</span>' : '') +
-      '</div></div>';
+    var cls = role === 'user' ? 'user' : 'ai';
+    var body = role === 'user' ? escapeHtml(content) : renderMarkdown(content);
+    return '<div class="assistant-msg ' + cls + '">' + body +
+      (time ? '<span class="assistant-msg-time">' + time + '</span>' : '') + '</div>';
   }
-
-  function dateDividerHtml(label) {
-    return '<div class="assistant-date-divider">' + escapeHtml(label) + '</div>';
-  }
-
-  function dateKey(s) { return s ? s.slice(0, 10) : null; }
-
-  function dateLabel(s) {
-    if (!s) return '';
-    var d = new Date(s.replace(' ', 'T'));
-    if (isNaN(d.getTime())) return s.slice(0, 10);
-    var now = new Date();
-    function sameDay(a, b) {
-      return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-    }
-    function hm(x) { return pad(x.getHours()) + ':' + pad(x.getMinutes()); }
-    if (sameDay(d, now)) return '今天 ' + hm(d);
-    var yest = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-    if (sameDay(d, yest)) return '昨天 ' + hm(d);
-    return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm(d);
-  }
-
-  function pad(n) { return n < 10 ? '0' + n : '' + n; }
 
   // ===== 轻量 Markdown 渲染（仅用于 AI 回答；先转义再排版，天然防 XSS） =====
   function renderMarkdown(src) {
@@ -193,10 +79,7 @@ window.AssistantPanel = (function () {
     var para = [];
 
     function flushPara() {
-      if (para.length) {
-        html += '<p>' + para.map(inline).join('<br>') + '</p>';
-        para = [];
-      }
+      if (para.length) { html += '<p>' + para.map(inline).join('<br>') + '</p>'; para = []; }
     }
     function inline(s) {
       s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (m, t, u) {
@@ -216,9 +99,7 @@ window.AssistantPanel = (function () {
         var buf = [];
         i++;
         while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i++; }
-        html += '<div class="assistant-code-block"><div class="assistant-code-head"><span>代码</span>' +
-          '<button type="button" class="assistant-copy-btn">复制</button></div>' +
-          '<pre><code>' + buf.join('\n') + '</code></pre></div>';
+        html += '<pre><code>' + buf.join('\n') + '</code></pre>';
         i++;
         continue;
       }
@@ -241,10 +122,7 @@ window.AssistantPanel = (function () {
       if (/^\s*>\s?/.test(line)) {
         flushPara();
         var q = [];
-        while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
-          q.push(inline(lines[i].replace(/^\s*>\s?/, '')));
-          i++;
-        }
+        while (i < lines.length && /^\s*>\s?/.test(lines[i])) { q.push(inline(lines[i].replace(/^\s*>\s?/, ''))); i++; }
         html += '<blockquote>' + q.join('<br>') + '</blockquote>';
         continue;
       }
@@ -301,7 +179,7 @@ window.AssistantPanel = (function () {
             tbl += '</tr>';
           }
           tbl += '</tbody></table>';
-          html += '<div class="assistant-table-wrap">' + tbl + '</div>';
+          html += tbl;
         }
         continue;
       }
@@ -332,59 +210,16 @@ window.AssistantPanel = (function () {
     if (!body) return;
     var empty = body.querySelector('.assistant-empty');
     if (empty) empty.remove();
-    var last = body.querySelector('.assistant-msg:last-child');
-    var d = time ? time.slice(0, 10) : null;
-    if (d && last && last.getAttribute('data-date') !== d) {
-      body.insertAdjacentHTML('beforeend', dateDividerHtml(dateLabel(time)));
-    }
     body.insertAdjacentHTML('beforeend', bubbleHtml(role, content, time));
     scrollBottom();
   }
 
-  function showThinking() {
-    var body = el('assistantBody');
-    if (!body) return;
-    hideThinking();
-    body.insertAdjacentHTML('beforeend',
-      '<div class="assistant-msg ai">' +
-      '<div class="assistant-avatar-sm ai"><i class="ph ph-chat-circle-text"></i></div>' +
-      '<div class="assistant-bubble"><span class="assistant-thinking" id="assistantThinking">' +
-      '<span class="dot"></span><span class="dot"></span><span class="dot"></span></span></div></div>');
-    scrollBottom();
-  }
-
-  function hideThinking() {
-    var t = el('assistantThinking');
-    if (t) {
-      var row = t.closest ? t.closest('.assistant-msg') : null;
-      if (row) row.remove();
-    }
-  }
-
-  function getWord() {
+  function getWordId() {
     if (typeof cfg.getCurrentWord === 'function') {
       var w = cfg.getCurrentWord();
-      return w && w.id ? w : null;
+      return w && w.id ? w.id : null;
     }
     return null;
-  }
-
-  function getWordId() {
-    var w = getWord();
-    return w ? w.id : null;
-  }
-
-  function refreshCurrentWord() {
-    var cap = el('assistantWordCapsule');
-    var nameEl = el('assistantWordName');
-    var chips = el('assistantChips');
-    var w = getWord();
-    var has = !!(w && w.word);
-    if (cap && nameEl) {
-      nameEl.textContent = has ? w.word : '';
-      cap.classList.toggle('hidden', !has);
-    }
-    if (chips) chips.classList.toggle('hidden', !has);
   }
 
   function sendFromInput() {
@@ -401,30 +236,15 @@ window.AssistantPanel = (function () {
     sending = true;
     setSending(true);
     appendMsg('user', text, null);
-    showThinking();
-    slowTimer = setTimeout(function () {
-      var t = el('assistantThinking');
-      if (t && !t.querySelector('.assistant-thinking-hint')) {
-        t.insertAdjacentHTML('beforeend', '<span class="assistant-thinking-hint">模型响应较慢，请稍候…</span>');
-      }
-    }, 3000);
-
     VOCAB_API.post('/api/assistant/', { message: text, word_id: getWordId() }).then(function (res) {
-      clearTimeout(slowTimer);
-      hideThinking();
-      if (res && res.success) {
+      if (res.success) {
         appendMsg('assistant', res.assistant_message.content, res.assistant_message.created_at);
-        appendToCache(res.user_message, res.assistant_message);
       } else {
-        showError((res && res.error) || '出错了，请重试');
-        if (res && res.error && /模型/.test(res.error)) {
-          showToast('请到设置页配置并启用 AI 模型', 'error');
-        }
+        appendMsg('assistant', '⚠️ ' + (res.error || '出错了'));
+        if (res.error && /模型/.test(res.error)) showToast('请到设置页配置并启用 AI 模型', 'error');
       }
     }).catch(function () {
-      clearTimeout(slowTimer);
-      hideThinking();
-      showError('网络错误，请稍后重试');
+      appendMsg('assistant', '⚠️ 网络错误，请稍后重试');
     }).finally(function () {
       sending = false;
       setSending(false);
@@ -442,98 +262,28 @@ window.AssistantPanel = (function () {
       : '<i class="ph ph-paper-plane-tilt"></i>';
   }
 
-  // 快捷提问：把「当前单词」替换成真实单词再发送
-  function ask(prompt) {
-    var w = getWord();
-    if (!w || !w.word) {
-      showToast('请先选择一个单词', 'error');
-      return;
-    }
-    var text = String(prompt || '').replace(/当前单词/g, '「' + w.word + '」');
-    if (!text.trim()) return;
-    send(text);
-  }
-
-  // 兼容旧调用：一键询问当前单词的考法
+  // 一键询问当前单词的考法
   function askCurrentWord() {
-    var w = getWord();
-    if (!w || !w.word) {
-      showToast('请先选择一个单词', 'error');
-      return;
-    }
+    var w = (typeof cfg.getCurrentWord === 'function') ? cfg.getCurrentWord() : null;
+    if (!w || !w.word) { showToast('请先选择一个单词', 'error'); return; }
     send('请讲解单词 "' + w.word + '" 的考法、常见搭配和记忆技巧');
   }
 
-  // 两步确认清空，避免误删
   function clearHistory() {
-    var btn = el('assistantClearBtn');
-    if (!confirmingClear) {
-      confirmingClear = true;
-      if (btn) {
-        btn.innerHTML = '<i class="ph ph-check"></i> 确认？';
-        btn.classList.add('btn-danger');
-      }
-      clearTimer = setTimeout(resetClearConfirm, 3000);
-      return;
-    }
-    resetClearConfirm();
+    if (!confirm('确定要清空小助手的全部聊天记录吗？')) return;
     VOCAB_API.del('/api/assistant/').then(function (res) {
-      if (res && res.success) {
+      if (res.success) {
         renderMessages([]);
-        try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
         showToast('对话记录已清空', 'success');
       } else {
-        showToast((res && res.error) || '清空失败', 'error');
+        showToast(res.error || '清空失败', 'error');
       }
     }).catch(function () { showToast('请求失败', 'error'); });
   }
 
-  function resetClearConfirm() {
-    confirmingClear = false;
-    clearTimeout(clearTimer);
-    var btn = el('assistantClearBtn');
-    if (btn) {
-      btn.innerHTML = '<i class="ph ph-trash"></i>';
-      btn.classList.remove('btn-danger');
-    }
-  }
-
-  function showError(msg) {
-    var e = el('assistantError');
-    if (!e) return;
-    var span = e.querySelector('span');
-    if (span) span.textContent = msg || '出错了';
-    e.classList.remove('hidden');
-    clearTimeout(errTimer);
-    errTimer = setTimeout(hideError, 10000);
-  }
-
-  function hideError() {
-    var e = el('assistantError');
-    if (e) e.classList.add('hidden');
-  }
-
-  // 本地缓存：先渲染再刷新，减少等待感
-  function saveCache(msgs) {
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify((msgs || []).slice(-50))); } catch (e) {}
-  }
-  function loadCache() {
-    try {
-      var s = localStorage.getItem(CACHE_KEY);
-      return s ? JSON.parse(s) : null;
-    } catch (e) { return null; }
-  }
-  function appendToCache() {
-    var cached = loadCache() || [];
-    for (var i = 0; i < arguments.length; i++) {
-      if (arguments[i]) cached.push(arguments[i]);
-    }
-    saveCache(cached);
-  }
-
   return {
     init: init, toggle: toggle, open: open, close: close, isOpen: isOpen,
-    sendFromInput: sendFromInput, ask: ask, askCurrentWord: askCurrentWord,
-    refreshCurrentWord: refreshCurrentWord, clearHistory: clearHistory,
+    sendFromInput: sendFromInput, askCurrentWord: askCurrentWord,
+    clearHistory: clearHistory,
   };
 })();

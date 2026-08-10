@@ -12,53 +12,58 @@
 {% csrf_token %}
 
 <!-- Hero -->
-<div class="card" style="margin-bottom: 24px;">
-  <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 16px;">
-    <div>
-      <h1 style="margin: 0 0 6px 0; font-size: var(--fs-2xl); font-weight: 700;">不要把梦想埋没！</h1>
-      <p class="text-secondary" id="today-date" style="margin: 0; font-size: var(--fs-sm);"></p>
-    </div>
-    <div class="text-secondary" id="today-date-brief" style="font-size: var(--fs-sm);"></div>
+<div class="card hero-card" style="margin-bottom: 24px;">
+  <div>
+    <h1 class="hero-title">今天也要<span class="text-red">订正</span>昨天的错</h1>
+    <p class="text-secondary" id="today-date" style="margin: 0; font-size: var(--fs-sm);"></p>
+  </div>
+  <div class="flex items-center" style="gap: 12px;">
+    <span class="stamp">连续打卡 {{ streak }} 天</span>
+    <div class="date-chip" id="today-date-brief"></div>
   </div>
 </div>
 
 <!-- Today's tasks -->
 <div class="card-grid" style="margin-bottom: 24px;">
   <div class="card stat-card">
-    <div class="card-header" style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
-      <i class="ph ph-book-open ph-sm"></i> 今日新词
+    <div class="stat-card-head">
+      <span class="stat-icon stat-icon--red"><i class="ph ph-book-open"></i></span>
+      <div class="card-header">今日新词</div>
     </div>
     <div class="stat-value">{{ today_new }} <span style="font-size: var(--fs-base); font-weight: 400; color: var(--c-text-3);">/ {{ settings.daily_new_target|default:30 }}</span></div>
     <div class="progress-bar" style="margin-top: 12px;">
-      <div class="progress-bar-fill" style="width: {% if settings.daily_new_target > 0 %}{% widthratio today_new settings.daily_new_target 100 %}{% else %}0{% endif %}%;"></div>
+      <div class="progress-bar-fill progress-fill--red" style="width: {% if settings.daily_new_target > 0 %}{% widthratio today_new settings.daily_new_target 100 %}{% else %}0{% endif %}%;"></div>
     </div>
     <div class="stat-label" style="margin-top: 8px;">目标完成度</div>
   </div>
 
   <div class="card stat-card">
-    <div class="card-header" style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
-      <i class="ph ph-arrows-clockwise ph-sm"></i> 今日复习
+    <div class="stat-card-head">
+      <span class="stat-icon stat-icon--blue"><i class="ph ph-arrows-clockwise"></i></span>
+      <div class="card-header">今日复习</div>
     </div>
     <div class="stat-value">{{ today_review }} <span style="font-size: var(--fs-base); font-weight: 400; color: var(--c-text-3);">/ {{ settings.daily_review_target|default:50 }}</span></div>
     <div class="progress-bar" style="margin-top: 12px;">
-      <div class="progress-bar-fill" style="width: {% if settings.daily_review_target > 0 %}{% widthratio today_review settings.daily_review_target 100 %}{% else %}0{% endif %}%;"></div>
+      <div class="progress-bar-fill progress-fill--blue" style="width: {% if settings.daily_review_target > 0 %}{% widthratio today_review settings.daily_review_target 100 %}{% else %}0{% endif %}%;"></div>
     </div>
     <div class="stat-label" style="margin-top: 8px;">目标完成度</div>
   </div>
 
   <div class="card stat-card">
-    <div class="card-header" style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
-      <i class="ph ph-clock ph-sm"></i> 待复习
+    <div class="stat-card-head">
+      <span class="stat-icon stat-icon--ink"><i class="ph ph-clock"></i></span>
+      <div class="card-header">待复习</div>
     </div>
     <div class="stat-value">{{ review_due }}</div>
     <div class="stat-label">已学可复习单词</div>
   </div>
 
   <div class="card stat-card">
-    <div class="card-header" style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
-      <i class="ph ph-fire ph-sm"></i> 连续打卡
+    <div class="stat-card-head">
+      <span class="stat-icon stat-icon--amber"><i class="ph ph-fire"></i></span>
+      <div class="card-header">连续打卡</div>
     </div>
-    <div class="stat-value" style="color: var(--c-green);">{{ streak }} <span style="font-size: var(--fs-base); font-weight: 400; color: var(--c-text-3);">天</span></div>
+    <div class="stat-value" style="color: var(--c-red);">{{ streak }} <span style="font-size: var(--fs-base); font-weight: 400; color: var(--c-text-3);">天</span></div>
     <div class="stat-label" id="checkin-status">
       {% if today_checkin and today_checkin.is_checked %}
         今日已打卡
@@ -68,15 +73,16 @@
     </div>
     {% if not today_checkin or not today_checkin.is_checked %}
     <div class="progress-bar" style="margin-top: 12px;">
-      <div class="progress-bar-fill" style="width: {{ checkin_percent }}%;"></div>
+      <div class="progress-bar-fill progress-fill--amber" style="width: {{ checkin_percent }}%;"></div>
     </div>
     <div class="stat-label" style="margin-top: 8px;">今日已学 {{ checkin_words }} 词，满 {{ checkin_threshold }} 词自动打卡</div>
     {% endif %}
   </div>
 
   <div class="card stat-card">
-    <div class="card-header" style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
-      <i class="ph ph-timer ph-sm"></i> 今日时长
+    <div class="stat-card-head">
+      <span class="stat-icon stat-icon--purple"><i class="ph ph-timer"></i></span>
+      <div class="card-header">今日时长</div>
     </div>
     <div class="stat-value" id="todayDuration" data-seconds="{{ today_duration }}">-</div>
     <div class="stat-label" id="todayDurationLabel">学习页可见时计时</div>
@@ -134,6 +140,13 @@
       <a href="{% url 'words:review_session' %}" class="btn btn-secondary btn-sm" style="width: 100%;">去复习 →</a>
     </div>
   </div>
+</div>
+{% else %}
+<div class="card empty-state" style="margin-bottom: 24px;">
+  <i class="ph ph-calendar-blank"></i>
+  <div class="empty-state-title">还没有学习计划</div>
+  <div class="empty-state-hint">制定一个计划，让每天的学习目标更清晰、更容易坚持</div>
+  <a href="{% url 'words:study_plan' %}" class="btn btn-primary btn-sm">去制定计划</a>
 </div>
 {% endif %}
 
@@ -228,6 +241,24 @@
 <script>
   var weeklyChart = null;
 
+  // 当前主题配色（跟随明暗模式）
+  function chartPalette() {
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    return {
+      surface: dark ? '#2a251e' : '#fefcf7',
+      border: dark ? '#423a2c' : '#e4ddcc',
+      borderLight: dark ? '#383124' : '#eee8da',
+      text: dark ? '#e9e1d0' : '#2b2721',
+      text2: dark ? '#ab9f8a' : '#6f6859',
+      text3: dark ? '#7d7360' : '#a49c8b',
+      green: dark ? '#e07a6b' : '#c0392b',
+      greenRgb: dark ? '224,122,107' : '192,57,43',
+      purple: dark ? '#b6a5c7' : '#7b6b8f',
+      purpleRgb: dark ? '182,165,199' : '123,107,143',
+      amber: dark ? '#d8a94f' : '#b7791f'
+    };
+  }
+
   // Today's date in Chinese
   (function () {
     var options = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' };
@@ -251,19 +282,20 @@
       var dom = document.getElementById('weeklyTrendChart');
       if (weeklyChart) weeklyChart.dispose();
       weeklyChart = echarts.init(dom);
+      var P = chartPalette();
 
       weeklyChart.setOption({
         tooltip: {
           trigger: 'axis',
-          backgroundColor: 'rgba(253,250,241,0.96)',
-          borderColor: '#e3d8c1',
+          backgroundColor: P.surface,
+          borderColor: P.border,
           borderWidth: 1,
           padding: [10, 14],
-          textStyle: { color: '#37332a', fontSize: 13 },
+          textStyle: { color: P.text, fontSize: 13 },
           extraCssText: 'box-shadow: 0 6px 24px rgba(0,0,0,0.08); border-radius: 10px;',
           axisPointer: {
             type: 'line',
-            lineStyle: { color: '#cbd5e1', width: 1 }
+            lineStyle: { color: P.border, width: 1 }
           },
           formatter: function (params) {
             var date = params[0].axisValue;
@@ -281,7 +313,7 @@
                 html += p.marker + ' ' + p.seriesName + ': ' + val + '<br/>';
               }
             });
-            html += '<hr style="margin:4px 0;border:none;border-top:1px solid #e3d8c1"/>';
+            html += '<hr style="margin:4px 0;border:none;border-top:1px solid ' + P.border + '"/>';
             html += '<strong>单词总计: ' + wordTotal + '</strong>';
             return html;
           }
@@ -293,17 +325,17 @@
           itemWidth: 10,
           itemHeight: 10,
           itemGap: 20,
-          textStyle: { color: '#7a705d', fontSize: 13 }
+          textStyle: { color: P.text2, fontSize: 13 }
         },
         grid: { left: 10, right: 10, top: 36, bottom: 8, containLabel: true },
         xAxis: {
           type: 'category',
           data: labels,
           boundaryGap: false,
-          axisLine: { lineStyle: { color: '#e3d8c1' } },
+          axisLine: { lineStyle: { color: P.border } },
           axisTick: { show: false },
           axisLabel: {
-            color: '#a89d87',
+            color: P.text3,
             fontSize: 12,
             rotate: labels.length > 7 ? 45 : 0
           }
@@ -312,22 +344,22 @@
           {
             type: 'value',
             name: '单词数',
-            nameTextStyle: { color: '#a89d87', fontSize: 11, padding: [0, 0, 0, 4] },
+            nameTextStyle: { color: P.text3, fontSize: 11, padding: [0, 0, 0, 4] },
             minInterval: 1,
             axisLine: { show: false },
             axisTick: { show: false },
-            axisLabel: { color: '#a89d87', fontSize: 12 },
-            splitLine: { lineStyle: { color: '#ece3cf', type: 'dashed' } }
+            axisLabel: { color: P.text3, fontSize: 12 },
+            splitLine: { lineStyle: { color: P.borderLight, type: 'dashed' } }
           },
           {
             type: 'value',
             name: '分钟',
-            nameTextStyle: { color: '#a89d87', fontSize: 11, padding: [0, 4, 0, 0] },
+            nameTextStyle: { color: P.text3, fontSize: 11, padding: [0, 4, 0, 0] },
             minInterval: 1,
             position: 'right',
             axisLine: { show: false },
             axisTick: { show: false },
-            axisLabel: { color: '#a89d87', fontSize: 12 },
+            axisLabel: { color: P.text3, fontSize: 12 },
             splitLine: { show: false }
           }
         ],
@@ -341,12 +373,12 @@
             symbol: 'circle',
             symbolSize: 6,
             showSymbol: false,
-            lineStyle: { width: 2, color: '#3f5c45' },
-            itemStyle: { color: '#3f5c45', borderColor: '#fff', borderWidth: 2 },
+            lineStyle: { width: 2, color: P.green },
+            itemStyle: { color: P.green, borderColor: '#fff', borderWidth: 2 },
             areaStyle: {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: 'rgba(63,92,69,0.35)' },
-                { offset: 1, color: 'rgba(63,92,69,0.02)' }
+                { offset: 0, color: 'rgba(' + P.greenRgb + ',0.35)' },
+                { offset: 1, color: 'rgba(' + P.greenRgb + ',0.02)' }
               ])
             },
             emphasis: { focus: 'series' }
@@ -360,12 +392,12 @@
             symbol: 'circle',
             symbolSize: 6,
             showSymbol: false,
-            lineStyle: { width: 2, color: '#8a6f9e' },
-            itemStyle: { color: '#8a6f9e', borderColor: '#fff', borderWidth: 2 },
+            lineStyle: { width: 2, color: P.purple },
+            itemStyle: { color: P.purple, borderColor: '#fff', borderWidth: 2 },
             areaStyle: {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: 'rgba(138,111,158,0.35)' },
-                { offset: 1, color: 'rgba(138,111,158,0.02)' }
+                { offset: 0, color: 'rgba(' + P.purpleRgb + ',0.35)' },
+                { offset: 1, color: 'rgba(' + P.purpleRgb + ',0.02)' }
               ])
             },
             emphasis: { focus: 'series' }
@@ -379,8 +411,8 @@
             symbol: 'circle',
             symbolSize: 5,
             showSymbol: false,
-            lineStyle: { width: 2, color: '#d97706', type: 'dashed' },
-            itemStyle: { color: '#d97706' },
+            lineStyle: { width: 2, color: P.amber, type: 'dashed' },
+            itemStyle: { color: P.amber },
             emphasis: { focus: 'series' }
           }
         ]
@@ -405,7 +437,7 @@
     var dayMap = {};
     try { dayMap = JSON.parse(dataEl.textContent); } catch (e) { return; }
 
-  var LEVEL_COLORS = ['var(--heat-empty)', '#d3e2cb', '#a3bfa0', '#719375', '#3f5c45'];
+  var LEVEL_COLORS = ['var(--heat-empty)', 'var(--heat-l1)', 'var(--heat-l2)', 'var(--heat-l3)', 'var(--heat-l4)'];
     var GAP = 3;
 
     function levelOf(count) {
@@ -558,6 +590,12 @@
   });
 
   // Load chart on page ready
+  // 主题切换时重绘图表与热力图
+  window.addEventListener('vocab-theme-change', function () {
+    loadWeeklyTrend();
+    renderCheckinHeatmap();
+  });
+
   document.addEventListener('DOMContentLoaded', function () {
     loadWeeklyTrend();
     renderCheckinHeatmap();

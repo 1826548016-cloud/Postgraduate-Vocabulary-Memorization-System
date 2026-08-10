@@ -129,15 +129,67 @@
 
   <div id="modelList" class="flex flex-col" style="gap: 8px;"></div>
 
-  <!-- 小助手模型 -->
+  <!-- 各功能模型 -->
+  <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--c-border-light);">
+    <div class="flex flex-col" style="gap: 14px;">
+      <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 10px;">
+        <div>
+          <div style="font-weight: 500;"><i class="ph ph-image" style="color: var(--c-green);"></i> 导入识别模型</div>
+          <div class="text-sm text-secondary">AI 单词导入（图片 / 文本 / 文件）识别使用的模型</div>
+        </div>
+        <select id="recognizeModelSelect" class="form-input" style="min-width: 240px;" onchange="saveFeatureModel('recognize_model', this.value)">
+          <option value="">自动（使用第一个启用的模型）</option>
+        </select>
+      </div>
+      <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 10px;">
+        <div>
+          <div style="font-weight: 500;"><i class="ph ph-seal-check" style="color: var(--c-green);"></i> 复审模型</div>
+          <div class="text-sm text-secondary">AI 复审（二次校验识别结果）使用的模型</div>
+        </div>
+        <select id="reviewModelSelect" class="form-input" style="min-width: 240px;" onchange="saveFeatureModel('review_model', this.value)">
+          <option value="">自动（使用第一个启用的模型）</option>
+        </select>
+      </div>
+      <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 10px;">
+        <div>
+          <div style="font-weight: 500;"><i class="ph ph-lightning" style="color: var(--c-green);"></i> 速记生成模型</div>
+          <div class="text-sm text-secondary">背诵卡「AI 速记」生成使用的模型</div>
+        </div>
+        <select id="quickMemoryModelSelect" class="form-input" style="min-width: 240px;" onchange="saveFeatureModel('quick_memory_model', this.value)">
+          <option value="">自动（使用第一个启用的模型）</option>
+        </select>
+      </div>
+      <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 10px;">
+        <div>
+          <div style="font-weight: 500;"><i class="ph ph-pencil-simple" style="color: var(--c-green);"></i> 释义默写判定模型</div>
+          <div class="text-sm text-secondary">「看英文写中文意思」AI 判定使用的模型</div>
+        </div>
+        <select id="meaningCheckModelSelect" class="form-input" style="min-width: 240px;" onchange="saveFeatureModel('meaning_check_model', this.value)">
+          <option value="">自动（使用第一个启用的模型）</option>
+        </select>
+      </div>
+      <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 10px;">
+        <div>
+          <div style="font-weight: 500;"><i class="ph ph-chat-circle-text" style="color: var(--c-green);"></i> 小助手模型</div>
+          <div class="text-sm text-secondary">背诵 / 专注 / 复习中小助手问答使用的模型，切换后立即生效</div>
+        </div>
+        <select id="assistantModelSelect" class="form-input" style="min-width: 240px;" onchange="saveFeatureModel('assistant_model', this.value)">
+          <option value="">自动（使用第一个启用的模型）</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- 释义默写判定方式 -->
   <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--c-border-light);">
     <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 10px;">
       <div>
-        <div style="font-weight: 500;"><i class="ph ph-chat-circle-text" style="color: var(--c-green);"></i> 小助手模型</div>
-        <div class="text-sm text-secondary">背诵 / 专注 / 复习中小助手问答使用的模型，切换后立即生效</div>
+        <div style="font-weight: 500;"><i class="ph ph-pencil-simple" style="color: var(--c-green);"></i> 释义默写判定</div>
+        <div class="text-sm text-secondary">「看英文写中文意思」的判定方式：AI 判定更灵活（识别同义词 / 部分正确），本地比对不依赖网络</div>
       </div>
-      <select id="assistantModelSelect" class="form-input" style="min-width: 240px;" onchange="saveAssistantModel(this.value)">
-        <option value="">自动（使用第一个启用的模型）</option>
+      <select id="meaningCheckMode" class="form-input" style="min-width: 240px;" onchange="saveMeaningCheckMode(this.value)">
+        <option value="ai" {% if settings.use_ai_meaning_check %}selected{% endif %}>AI 判定（推荐）</option>
+        <option value="local" {% if not settings.use_ai_meaning_check %}selected{% endif %}>本地比对（离线）</option>
       </select>
     </div>
   </div>
@@ -189,10 +241,10 @@
 <div class="card">
   <div class="card-header">关于</div>
   <div class="text-secondary">
-    <p>智能单词背诵平台 v2.0.0</p>
-    <p>一个高效的考研单词背诵应用</p>
+    <p>考研单词背诵系统 v2.0.0</p>
+    <p>一个高效的考研单词背诵平台（词源来源于网络）</p>
     <p>技术栈：Django + Chart.js + Browser TTS</p>
-    <p>最后更新于：2026年8月6日</p>
+    <p>最后更新于：2026年8月10日</p>
     <p>声明：仅用于学习和研究，不涉及任何商业用途。</p>
   </div>
 </div>
@@ -399,7 +451,7 @@ function loadAIModels() {
   return VOCAB_API.get('/api/ai-models/').then(function (res) {
     aiModels = (res && res.models) || [];
     renderModelList();
-    loadAssistantModel();
+    loadFeatureModels();
     return aiModels;
   }).catch(function () {
     aiModels = [];
@@ -411,25 +463,43 @@ function loadAIModels() {
 // 全局 API 填写窗口保存成功后刷新本页模型列表
 window.aiModelModalOnSaved = loadAIModels;
 
-// ===== 小助手模型 =====
-function loadAssistantModel() {
-  return VOCAB_API.get('/api/assistant/model/').then(function (res) {
-    var sel = document.getElementById('assistantModelSelect');
-    if (!sel) return;
-    var opts = '<option value="">自动（使用第一个启用的模型）</option>';
-    aiModels.forEach(function (m) {
-      var name = m.display_name || m.model_id;
-      opts += '<option value="' + m.id + '"' + (m.enabled ? '' : ' disabled') + '>'
-        + name + (m.enabled ? '' : '（已禁用）') + '</option>';
-    });
-    sel.innerHTML = opts;
-    sel.value = res.assistant_model_id ? String(res.assistant_model_id) : '';
+// ===== 各功能模型 =====
+function fillModelSelect(selId, value) {
+  var sel = document.getElementById(selId);
+  if (!sel) return;
+  var opts = '<option value="">自动（使用第一个启用的模型）</option>';
+  aiModels.forEach(function (m) {
+    var name = m.display_name || m.model_id;
+    opts += '<option value="' + m.id + '"' + (m.enabled ? '' : ' disabled') + '>'
+      + name + (m.enabled ? '' : '（已禁用）') + '</option>';
+  });
+  sel.innerHTML = opts;
+  sel.value = value ? String(value) : '';
+}
+
+function loadFeatureModels() {
+  return VOCAB_API.get('/api/settings/').then(function (res) {
+    if (!res || !res.success) return;
+    fillModelSelect('assistantModelSelect', res.assistant_model_id);
+    fillModelSelect('recognizeModelSelect', res.recognize_model_id);
+    fillModelSelect('reviewModelSelect', res.review_model_id);
+    fillModelSelect('quickMemoryModelSelect', res.quick_memory_model_id);
+    fillModelSelect('meaningCheckModelSelect', res.meaning_check_model_id);
   }).catch(function () {});
 }
 
-function saveAssistantModel(val) {
-  VOCAB_API.post('/api/assistant/model/', { model_id: val || null }).then(function (res) {
-    if (res.success) showToast('小助手模型已更新', 'success');
+function saveFeatureModel(field, val) {
+  var payload = {};
+  payload[field] = val || null;
+  VOCAB_API.post('/api/settings/', payload).then(function (res) {
+    if (res.success) showToast('模型设置已更新', 'success');
+    else showToast(res.error || '保存失败', 'error');
+  }).catch(function () { showToast('请求失败', 'error'); });
+}
+
+function saveMeaningCheckMode(val) {
+  VOCAB_API.post('/api/settings/', { use_ai_meaning_check: val === 'ai' }).then(function (res) {
+    if (res.success) showToast('释义判定方式已更新', 'success');
     else showToast(res.error || '保存失败', 'error');
   }).catch(function () { showToast('请求失败', 'error'); });
 }

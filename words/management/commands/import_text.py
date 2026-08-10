@@ -8,7 +8,7 @@ import sys
 import re
 from django.core.management.base import BaseCommand
 from words.models import Unit, Word
-from words.views import normalize_word_data
+from words.views import normalize_word_data, ai_complete_words
 
 # 单词条目行： "N. word /phonetic/"  或  "N. word(var) /phonetic/"  或  "N. word"（无音标）
 WORD_LINE_RE = re.compile(r'^\s*(\d+)\.\s+(.+?)\s*$')
@@ -163,6 +163,7 @@ class Command(BaseCommand):
         # 导入单词（统一走 normalize_word_data 规范化：词性/释义/按词性分组三同步）
         total = 0
         skipped = 0
+        created_words = []
         for i, wd in enumerate(words, 1):
             existing = Word.objects.filter(word__iexact=wd['word']).first()
             if existing:
@@ -179,7 +180,7 @@ class Command(BaseCommand):
                 skipped += 1
                 continue
 
-            Word.objects.create(
+            created_word = Word.objects.create(
                 word=nd['word'],
                 phonetic_us=nd['phonetic_us'],
                 phonetic_uk=nd['phonetic_uk'],
@@ -190,11 +191,19 @@ class Command(BaseCommand):
                 unit=unit,
                 list_number=i,
             )
+            created_words.append(created_word)
             total += 1
 
         # 更新单元词数
         unit.word_count = unit.words.count()
         unit.save()
+
+        # 导入后自动 AI 补全（按词性释义 + 例句），失败不影响导入结果
+        if created_words:
+            try:
+                ai_complete_words(created_words)
+            except Exception:
+                pass
 
         self.stdout.write(self.style.SUCCESS(
             f'\n导入完成！\n'

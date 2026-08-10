@@ -135,6 +135,13 @@ class StudyProgress(models.Model):
         verbose_name='首次学习日期', db_index=True)
     uncommon_pos = models.TextField(blank=True, default='[]',
         verbose_name='陌生词性', help_text='JSON格式: ["n.", "adj."]')
+    spelling_attempts = models.IntegerField(default=0, verbose_name='拼写检测次数')
+    spelling_correct = models.IntegerField(default=0, verbose_name='拼写正确次数')
+    meaning_attempts = models.IntegerField(default=0, verbose_name='释义默写次数')
+    meaning_correct = models.IntegerField(default=0, verbose_name='释义默写正确次数')
+    is_excluded = models.BooleanField(default=False, db_index=True,
+        verbose_name='永不忘记（永久排除）',
+        help_text='标记为永不忘记的词不再出现在背诵/复习中')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
     class Meta:
@@ -307,8 +314,17 @@ class UserSettings(models.Model):
         default='us', verbose_name='发音类型')
     daily_new_target = models.IntegerField(default=30, verbose_name='每日新词目标')
     daily_review_target = models.IntegerField(default=50, verbose_name='每日复习目标')
+    use_ai_meaning_check = models.BooleanField(default=True, verbose_name='释义默写使用 AI 判定')
     assistant_model = models.ForeignKey('AIModel', null=True, blank=True,
         on_delete=models.SET_NULL, related_name='+', verbose_name='小助手模型')
+    recognize_model = models.ForeignKey('AIModel', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='+', verbose_name='导入识别模型')
+    review_model = models.ForeignKey('AIModel', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='+', verbose_name='复审模型')
+    quick_memory_model = models.ForeignKey('AIModel', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='+', verbose_name='速记生成模型')
+    meaning_check_model = models.ForeignKey('AIModel', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='+', verbose_name='释义默写判定模型')
 
     class Meta:
         verbose_name = '用户设置'
@@ -325,6 +341,21 @@ class UserSettings(models.Model):
         return settings
 
 
+class Conversation(models.Model):
+    """AI 智能助手会话：每条对话独立，标题自动取首条消息"""
+    title = models.CharField(max_length=100, blank=True, default='新对话', verbose_name='会话标题')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        ordering = ['-updated_at']
+        verbose_name = 'AI 会话'
+        verbose_name_plural = 'AI 会话'
+
+    def __str__(self):
+        return self.title
+
+
 class ChatMessage(models.Model):
     """小助手对话记录：背诵/专注/复习三个模式共用同一条对话，历史持久化保存"""
     ROLE_CHOICES = [
@@ -334,6 +365,8 @@ class ChatMessage(models.Model):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, verbose_name='角色')
     content = models.TextField(verbose_name='内容')
     word_id = models.IntegerField(null=True, blank=True, verbose_name='关联单词 ID')
+    conversation_id = models.IntegerField(null=True, blank=True, verbose_name='会话 ID')
+    attachments = models.JSONField(default=list, blank=True, verbose_name='附件信息')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
 
     class Meta:
@@ -399,3 +432,28 @@ class ImportLog(models.Model):
             return json.loads(self.words_list)
         except (json.JSONDecodeError, TypeError):
             return []
+
+
+class LearningReport(models.Model):
+    """周学习报告：每周日生成一次，保存周期统计数据快照与 AI 评语"""
+    week_start = models.DateField(verbose_name='周起始日（周一）')
+    week_end = models.DateField(verbose_name='周结束日（周日）')
+    summary_json = models.TextField(default='{}', verbose_name='统计数据快照',
+        help_text='JSON格式，保存生成时的周期内核心指标')
+    ai_comment = models.TextField(blank=True, default='', verbose_name='AI 评语')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='生成时间')
+
+    class Meta:
+        ordering = ['-week_start']
+        unique_together = [('week_start',)]
+        verbose_name = '学习周报'
+        verbose_name_plural = '学习周报'
+
+    def __str__(self):
+        return f'{self.week_start} ~ {self.week_end} 周报'
+
+    def get_summary(self):
+        try:
+            return json.loads(self.summary_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}

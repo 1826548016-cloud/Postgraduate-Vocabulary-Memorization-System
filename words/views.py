@@ -3,13 +3,16 @@ import os
 import random
 import re
 import shutil
+import threading
 import time
 import urllib.request
 import urllib.error
+import base64
 from datetime import date, timedelta, datetime
 from io import BytesIO
 
 from django.conf import settings
+from django.db import close_old_connections
 from django.db.models import Q, Count, Sum, Avg, F, Max
 from django.http import JsonResponse, HttpResponse, FileResponse
 from django.shortcuts import render, get_object_or_404
@@ -19,13 +22,13 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from .models import (Unit, Word, StudyProgress, StudyPlan,
-                     DailyCheckIn, Favorite, Note, QuickMemory, AIModel, StudySession, UserSettings, ChatMessage, ImportLog)
+                     DailyCheckIn, Favorite, Note, QuickMemory, AIModel, StudySession, UserSettings, ChatMessage, ImportLog, Conversation, LearningReport)
 from .ai_prompts import (
     quick_memory_prompt, ASSISTANT_SYSTEM_PROMPT, assistant_word_context,
     pos_grouping_prompt, examples_prompt,
     RECOGNIZE_JSON_SCHEMA, RECOGNIZE_COMMON_RULES,
     recognize_image_prompt, recognize_text_prompt, recognize_file_prompt,
-    ai_review_prompt,
+    ai_review_prompt, weekly_report_prompt,
 )
 
 
@@ -203,12 +206,16 @@ def learn_start(request):
 
 def learn_session(request):
     mode = request.GET.get('mode', 'sequential')
+    check = request.GET.get('check', 'none')
     unit_ids = request.GET.getlist('units')
     scope = request.GET.get('scope', 'unknown')
 
     query = Word.objects.all()
     if unit_ids:
         query = query.filter(unit__number__in=unit_ids)
+
+    # 永不忘记的词（is_excluded）不再出现
+    query = query.exclude(progress__is_excluded=True)
 
     if scope == 'mastered':
         # 会的词：已掌握
@@ -253,20 +260,72 @@ def learn_session(request):
     return render(request, 'learn_session.html', {
         'word_count': len(word_data),
         'mode': mode,
+        'check': check,
         'words_json': json.dumps(word_data, ensure_ascii=False),
     })
 
 
+def review_start(request):
+    """复习：选择单元与范围（与背诵入口一致）"""
+    units = Unit.objects.annotate(
+        mastered=Count('words__progress', filter=Q(words__progress__status='mastered'))
+    ).all()
+    return render(request, 'review_start.html', {'units': units})
+
+
 def review_session(request):
-    """复习：从所有已学词汇中随机抽取，不再使用艾宾浩斯曲线。"""
+    """复习：从选定范围（单元/掌握状态）的已学词汇中随机抽取。
+    - mode=random 开始新一轮随机复习（清空已复习记录）
+    - random=1 继续上一轮随机复习（跳过已复习过的词）
+    - count=N 指定本轮抽取数量（默认使用每日复习目标）
+    """
     today = timezone.localdate()
     settings_obj = UserSettings.get_settings()
-    target = max(1, settings_obj.daily_review_target)
 
-    # 从所有已学词（status 不为 'new'）中随机抽取
-    all_progress = list(StudyProgress.objects.exclude(status='new').select_related('word'))
+    # 范围参数：units 多选单元编号；scope 掌握状态
+    unit_ids = request.GET.getlist('units')
+    scope = request.GET.get('scope', 'all')
+
+    # 随机复习模式
+    random_mode = request.GET.get('mode') == 'random' or request.GET.get('random') == '1'
+    if request.GET.get('mode') == 'random':
+        # 新一轮随机复习：清空历史记录
+        request.session['random_review_done'] = []
+
+    # 本轮抽取数量
+    target = max(1, settings_obj.daily_review_target)
+    if request.GET.get('count'):
+        try:
+            target = max(1, min(int(request.GET.get('count')), 500))
+        except (TypeError, ValueError):
+            pass
+
+    query = StudyProgress.objects.exclude(status='new').select_related('word')
+    # 永不忘记的词（is_excluded）不再出现
+    query = query.exclude(is_excluded=True)
+    if unit_ids:
+        query = query.filter(word__unit__number__in=unit_ids)
+    if scope == 'unmastered':
+        query = query.exclude(status='mastered')
+    elif scope == 'mastered':
+        query = query.filter(status='mastered')
+
+    all_progress = list(query)
+
+    # 随机复习：跳过已复习过的词（session 记录）
+    done_ids = request.session.get('random_review_done', []) or []
+    if random_mode and done_ids:
+        done_set = set(done_ids)
+        all_progress = [p for p in all_progress if p.id not in done_set]
+
     random.shuffle(all_progress)
     batch = all_progress[:target]
+
+    # 记录本轮已复习的词（随机模式）
+    if random_mode and batch:
+        done_ids = request.session.get('random_review_done', []) or []
+        done_ids.extend(p.id for p in batch)
+        request.session['random_review_done'] = done_ids[-2000:]
 
     word_data = []
     for p in batch:
@@ -289,15 +348,36 @@ def review_session(request):
     mastered_count = len([p for p in batch if p.status == 'mastered'])
     unmastered_count = len(batch) - mastered_count
 
+    # 范围描述（复习页顶部提示用）
+    scope_label = {
+        'all': '全部已学词',
+        'unmastered': '未掌握词',
+        'mastered': '已掌握词',
+    }.get(scope, '全部已学词')
+    if unit_ids:
+        unit_names = Unit.objects.filter(number__in=unit_ids).values_list('number', flat=True)
+        unit_label = '、'.join('Unit %s' % n for n in sorted(unit_names))
+    else:
+        unit_label = '全部单元'
+
+    # 继续随机复习链接参数
+    units_param = '&'.join('units=%s' % u for u in unit_ids)
+
     return render(request, 'review_session.html', {
         'review_count': len(word_data),
         'words_json': json.dumps(word_data, ensure_ascii=False),
-        'total_due': len(all_progress),  # 总已学词数
-        'remaining_due': max(0, len(all_progress) - len(word_data)),
+        'total_due': len(all_progress),  # 范围内可抽取的已学词总数
+        'remaining_due': max(0, len(all_progress) - len(batch)),
         'daily_review_target': settings_obj.daily_review_target,
         'batch_date': today.isoformat(),
         'unmastered_in_batch': unmastered_count,
         'mastered_in_batch': mastered_count,
+        'scope_label': scope_label,
+        'unit_label': unit_label,
+        'random_mode': random_mode,
+        'random_count': target,
+        'scope': scope,
+        'units_param': units_param,
     })
 
 
@@ -344,22 +424,48 @@ def favorites_list(request):
 
 
 def weak_words(request):
-    """薄弱词：学过但未掌握 / 历史出过错（error_count>0）的单词，按薄弱程度排序。"""
+    """薄弱词：从全部薄弱词中精选最需要巩固的 50 个。
+    选词机制（薄弱指数综合评分）：
+      - 错误次数 ×3（核心信号）
+      - 未掌握 +2（学习中 / 复习中）
+      - 掌握等级越低加分越多（(5-等级)×0.4）
+      - 反复复习仍出错加分（复习次数 ×0.2，封顶 20 次）
+      - 近期仍在复习的优先（7 天内 +1.5，30 天内 +0.8）
+    按指数从高到低取前 50 个；顶部统计仍展示全部薄弱词总览。
+    """
     progress_qs = (
         StudyProgress.objects
         .filter(Q(error_count__gt=0) | Q(status__in=['learning', 'reviewing']))
         .select_related('word__unit')
-        .order_by('-error_count', 'mastery_level', '-review_count')
     )
+    now = timezone.now()
 
-    items = []
+    pool = []
     total_errors = 0
     reviewed = 0
     for p in progress_qs:
-        w = p.word
         total_errors += p.error_count
         if p.review_count > 0:
             reviewed += 1
+        score = p.error_count * 3.0
+        if p.status != 'mastered':
+            score += 2.0
+        score += max(0, 5 - p.mastery_level) * 0.4
+        score += min(p.review_count, 20) * 0.2
+        if p.last_review:
+            days_since = (now - p.last_review).days
+            if days_since <= 7:
+                score += 1.5
+            elif days_since <= 30:
+                score += 0.8
+        pool.append((score, p))
+
+    pool.sort(key=lambda x: (-x[0], -x[1].error_count, -x[1].review_count))
+    selected = pool[:50]
+
+    items = []
+    for score, p in selected:
+        w = p.word
         items.append({
             'id': w.id,
             'word': w.word,
@@ -376,15 +482,21 @@ def weak_words(request):
             'unit_number': w.unit.number,
             'unit_name': w.unit.name,
             'is_favorite': hasattr(w, 'favorite'),
+            'score': round(score, 1),
         })
 
     stats = {
-        'total': len(items),
-        'unmastered': sum(1 for it in items if it['status'] != 'mastered'),
+        'total': len(pool),
+        'unmastered': sum(1 for _, p in pool if p.status != 'mastered'),
         'total_errors': total_errors,
         'reviewed': reviewed,
     }
-    return render(request, 'weak_words.html', {'items': items, 'stats': stats})
+    return render(request, 'weak_words.html', {
+        'items': items,
+        'stats': stats,
+        'selected_count': len(items),
+        'pool_count': len(pool),
+    })
 
 
 def focus_mode(request):
@@ -418,6 +530,8 @@ def api_words(request):
                 Q(progress__isnull=True) |
                 Q(progress__status__in=['new', 'learning', 'reviewing'])
             )
+        elif status == 'excluded':
+            qs = qs.filter(progress__is_excluded=True)
         else:
             qs = qs.filter(progress__status=status)
 
@@ -452,10 +566,18 @@ def api_words(request):
             'unit_name': w.unit.name,
             'status': p.status if p else 'new',
             'mastery_level': p.mastery_level if p else 0,
+            'is_excluded': p.is_excluded if p else False,
             'is_favorite': has_fav,
         })
 
-    return JsonResponse({'words': words_data, 'total': total, 'page': page})
+    total_excluded = Word.objects.filter(progress__is_excluded=True).count()
+
+    return JsonResponse({
+        'words': words_data,
+        'total': total,
+        'page': page,
+        'total_excluded': total_excluded,
+    })
 
 
 def api_word_detail(request, word_id):
@@ -536,6 +658,220 @@ def api_mark_word(request, action, word_id):
             'success': True,
             'status': progress.status,
             'mastery_level': progress.mastery_level,
+            'auto_checked': auto_checked,
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+
+def api_mark_skip(request, word_id):
+    """标记单词为「永不忘记」：之后不再出现在背诵/复习中。"""
+    try:
+        word = get_object_or_404(Word, id=word_id)
+        progress, _ = StudyProgress.objects.get_or_create(word=word)
+        progress.is_excluded = True
+        if progress.status == 'new':
+            progress.status = 'mastered'  # 视为已掌握，保证统计口径一致
+        progress.save()
+        return JsonResponse({
+            'success': True,
+            'is_excluded': True,
+            'status': progress.status,
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+
+def api_mark_unskip(request, word_id):
+    """取消「永不忘记」标记：恢复出现在背诵/复习中。"""
+    try:
+        word = get_object_or_404(Word, id=word_id)
+        progress = StudyProgress.objects.filter(word=word).first()
+        if not progress:
+            return JsonResponse({'success': True, 'is_excluded': False})
+        progress.is_excluded = False
+        progress.save()
+        return JsonResponse({
+            'success': True,
+            'is_excluded': False,
+            'status': progress.status,
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+
+MEANING_JUDGE_PROMPT = '''你是考研英语词汇老师，负责判定学生默写的单词中文释义是否合格。
+
+单词：{word}
+标准释义：{meanings}
+
+学生的答案：{answer}
+
+请判定学生答案是否表达了该单词的核心含义：
+1. 只要学生答案大致表达了核心含义（同义词、近义表达、简洁概括、个别用词不准均可），就算「correct」，本模式要求宽松，大致对即可判对。
+2. 只有沾边但完全没写到点子上、或明显答非所问的，才算「partial」或「wrong」。
+3. 完全不对、明显错误、或与单词无关的，算「wrong」。
+
+只输出 JSON，不要输出其他内容，格式：
+{{"verdict": "correct 或 partial 或 wrong", "comment": "一句话中文点评，指出对在哪或错在哪，并给出参考释义"}}
+'''
+
+
+def _normalize_spelling(text):
+    """拼写判定归一化：小写、去首尾空格、去掉非字母数字字符（容错连字符/撇号/空格）"""
+    return re.sub(r'[^a-z0-9]', '', (text or '').lower().strip())
+
+
+def _judge_meaning_answer(word, answer, data):
+    """判定释义默写答案：AI 优先（跟随设置里选的模型），失败退回本地比对。
+    返回 (verdict, comment, used_ai)。"""
+    if not (answer or '').strip():
+        return 'wrong', '未作答', False
+
+    meanings = word.get_meanings()
+    by_pos = word.get_meanings_by_pos()
+    meaning_parts = list(meanings)
+    for pos, ms in by_pos.items():
+        if ms:
+            meaning_parts.append('%s：%s' % (pos, '；'.join(ms)))
+    meaning_text = '；'.join(meaning_parts)
+
+    verdict = 'wrong'
+    comment = ''
+    used_ai = False
+    settings_obj = UserSettings.get_settings()
+
+    if settings_obj.meaning_check_model and not data.get('model_id'):
+        data['model_id'] = settings_obj.meaning_check_model_id
+
+    if settings_obj.use_ai_meaning_check and answer:
+        try:
+            cfg = resolve_ai_model(data)
+            prompt = MEANING_JUDGE_PROMPT.format(
+                word=word.word, meanings=meaning_text, answer=answer)
+            content = _ai_chat_once(cfg, prompt, max_tokens=500)
+            parsed = _extract_json_object(content)
+            v = parsed.get('verdict')
+            if v in ('correct', 'partial', 'wrong'):
+                verdict = v
+            comment = (parsed.get('comment') or '').strip()
+            used_ai = True
+        except Exception:
+            used_ai = False
+
+    if not used_ai:
+        # 本地比对兜底：去掉标点空白后看答案与任一标准释义是否互相包含
+        norm_answer = re.sub(r'[\s，。、；：,.!?；、]', '', answer)
+        hit = False
+        for m in meaning_parts:
+            norm_m = re.sub(r'[\s，。、；：,.!?；、]', '', m)
+            if not norm_m:
+                continue
+            if norm_m in norm_answer or norm_answer in norm_m:
+                hit = True
+                break
+        verdict = 'correct' if hit else 'wrong'
+        comment = '本地判定：%s' % ('与标准释义一致' if hit else '与标准释义不符')
+
+    return verdict, comment, used_ai
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_spelling_check(request, word_id):
+    """拼写检测：看中文默写英文，本地判定是否与标准拼写一致"""
+    try:
+        data = json.loads(request.body)
+        answer = (data.get('answer') or '').strip()
+        word = get_object_or_404(Word, id=word_id)
+        progress, created = StudyProgress.objects.get_or_create(word=word)
+        today = timezone.localdate()
+        now = timezone.now()
+
+        if created or progress.status == 'new':
+            progress.learned_date = today
+            progress.is_today_new = True
+
+        correct = bool(answer) and _normalize_spelling(answer) == _normalize_spelling(word.word)
+
+        progress.spelling_attempts += 1
+        if correct:
+            progress.spelling_correct += 1
+            progress.mastery_level = 5
+            progress.status = 'mastered'
+        else:
+            progress.error_count += 1
+            progress.mastery_level = 0
+            progress.status = 'learning'
+        progress.review_count += 1
+        progress.last_review = now
+        progress.save()
+
+        checkin, _ = DailyCheckIn.objects.get_or_create(date=today)
+        if correct:
+            checkin.today_correct += 1
+        else:
+            checkin.today_wrong += 1
+        checkin.save()
+
+        auto_checked = update_daily_checkin()
+
+        return JsonResponse({
+            'success': True,
+            'correct': correct,
+            'status': progress.status,
+            'auto_checked': auto_checked,
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_meaning_check(request, word_id):
+    """释义默写：看英文写中文意思，AI 判定正确 / 部分正确 / 错误（失败时退回本地比对）"""
+    try:
+        data = json.loads(request.body)
+        answer = (data.get('answer') or '').strip()
+        word = get_object_or_404(Word, id=word_id)
+        progress, created = StudyProgress.objects.get_or_create(word=word)
+
+        verdict, comment, used_ai = _judge_meaning_answer(word, answer, data)
+
+        today = timezone.localdate()
+        now = timezone.now()
+        if created or progress.status == 'new':
+            progress.learned_date = today
+            progress.is_today_new = True
+
+        progress.meaning_attempts += 1
+        if verdict in ('correct', 'partial'):
+            progress.meaning_correct += 1
+            progress.mastery_level = 5
+            progress.status = 'mastered'
+        else:
+            progress.error_count += 1
+            progress.mastery_level = 0
+            progress.status = 'learning'
+        progress.review_count += 1
+        progress.last_review = now
+        progress.save()
+
+        checkin, _ = DailyCheckIn.objects.get_or_create(date=today)
+        if verdict in ('correct', 'partial'):
+            checkin.today_correct += 1
+        else:
+            checkin.today_wrong += 1
+        checkin.save()
+
+        auto_checked = update_daily_checkin()
+
+        return JsonResponse({
+            'success': True,
+            'verdict': verdict,
+            'comment': comment,
+            'used_ai': used_ai,
+            'status': progress.status,
             'auto_checked': auto_checked,
         })
     except Exception as e:
@@ -636,8 +972,9 @@ def api_today(request):
         'meanings_by_pos': w.get_meanings_by_pos(),
     } for w in new_words]
 
-    # 今日需复习：从所有已学词中随机抽取
-    all_progress = list(StudyProgress.objects.exclude(status='new').select_related('word'))
+    # 今日需复习：从所有已学词中随机抽取（排除永不忘记的词）
+    all_progress = list(StudyProgress.objects.exclude(status='new')
+                        .exclude(is_excluded=True).select_related('word'))
     random.shuffle(all_progress)
     review_batch = all_progress[:settings_obj.daily_review_target]
 
@@ -945,6 +1282,157 @@ def api_stats(request, period):
         'category_progress': cat_progress,
         'level_distribution': status_dist,
     })
+
+
+def _get_week_bounds():
+    """返回本周一 ~ 本周日（自然周）。"""
+    today = timezone.localdate()
+    week_start = today - timedelta(days=today.weekday())  # 周一是 0
+    week_end = week_start + timedelta(days=6)
+    return week_start, week_end
+
+
+def _collect_report_summary(week_start, week_end):
+    """收集自然周内的统计快照数据（不含 AI 评语）。"""
+    today = timezone.localdate()
+    actual_end = min(week_end, today)  # 未到周日时统计到今天
+
+    # 周期内新学/复习（与 api_stats 同口径）
+    new_words = StudyProgress.objects.filter(
+        learned_date__gte=week_start, learned_date__lte=actual_end).count()
+    reviewed_words = StudyProgress.objects.filter(
+        last_review__date__gte=week_start, last_review__date__lte=actual_end,
+        review_count__gt=0
+    ).exclude(learned_date__gte=F('last_review__date')).count()
+
+    # 打卡数据
+    checkins = list(DailyCheckIn.objects.filter(
+        date__gte=week_start, date__lte=actual_end))
+    total_duration = sum(c.study_duration for c in checkins)
+    today_total = sum(c.today_correct + c.today_wrong for c in checkins)
+    today_correct = sum(c.today_correct for c in checkins)
+    correct_rate = round(today_correct / today_total * 100, 1) if today_total else 0
+    active_days = sum(1 for c in checkins if c.new_words_learned > 0 or c.words_reviewed > 0 or c.study_duration > 0)
+
+    # 学习最多的一天
+    best_day = None
+    if checkins:
+        best = max(checkins, key=lambda c: c.new_words_learned + c.words_reviewed)
+        if best.new_words_learned + best.words_reviewed > 0:
+            best_day = best.date.isoformat()
+
+    # 词库总体掌握情况
+    total_words = Word.objects.count()
+    mastered_words = StudyProgress.objects.filter(status='mastered').count()
+    learning_words = StudyProgress.objects.exclude(status='new').exclude(status='mastered').count()
+    excluded_words = StudyProgress.objects.filter(is_excluded=True).count()
+    not_learned = max(0, total_words - mastered_words - learning_words - excluded_words)
+    mastery_rate = round(mastered_words / total_words * 100, 1) if total_words else 0
+
+    # 完成度预测：按每日新词目标
+    settings_obj = UserSettings.get_settings()
+    daily_new_target = max(1, settings_obj.daily_new_target)
+    days_to_finish = (not_learned + daily_new_target - 1) // daily_new_target
+    finish_date = today + timedelta(days=days_to_finish)
+
+    # 易错词 Top10
+    weak_words = [{
+        'word': e.word.word,
+        'error_count': e.error_count,
+    } for e in StudyProgress.objects.select_related('word')
+        .filter(error_count__gt=0).order_by('-error_count')[:10]]
+
+    # 陌生词性统计（uncommon_pos JSON）
+    pos_counter = {}
+    for p in StudyProgress.objects.exclude(uncommon_pos='[]').exclude(uncommon_pos=''):
+        for pos in parse_uncommon_pos(p.uncommon_pos):
+            pos_counter[pos] = pos_counter.get(pos, 0) + 1
+    weak_pos = [{'pos': k, 'count': v} for k, v in
+                sorted(pos_counter.items(), key=lambda x: -x[1])[:5]]
+
+    return {
+        'period_label': f'{week_start.isoformat()} ~ {week_end.isoformat()}',
+        'week_start': week_start.isoformat(),
+        'week_end': week_end.isoformat(),
+        'actual_end': actual_end.isoformat(),
+        'new_words': new_words,
+        'reviewed_words': reviewed_words,
+        'study_duration': total_duration,
+        'correct_rate': correct_rate,
+        'streak': get_streak(),
+        'active_days': active_days,
+        'best_day': best_day,
+        'total_words': total_words,
+        'mastered_words': mastered_words,
+        'learning_words': learning_words,
+        'not_learned': not_learned,
+        'excluded_words': excluded_words,
+        'mastery_rate': mastery_rate,
+        'days_to_finish': days_to_finish,
+        'finish_date': finish_date.isoformat(),
+        'daily_new_target': daily_new_target,
+        'weak_words': weak_words,
+        'weak_pos': weak_pos,
+    }
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
+def api_learning_report(request):
+    """周学习报告：GET 查当前周报告与历史 / POST 生成（或重新生成）本周报告"""
+    week_start, week_end = _get_week_bounds()
+
+    if request.method == 'GET':
+        current = LearningReport.objects.filter(week_start=week_start).first()
+        history = [{
+            'id': r.id,
+            'week_start': r.week_start.isoformat(),
+            'week_end': r.week_end.isoformat(),
+            'summary': r.get_summary(),
+            'ai_comment': r.ai_comment,
+            'created_at': r.created_at.strftime('%Y-%m-%d %H:%M'),
+        } for r in LearningReport.objects.all()[:20]]
+        return JsonResponse({
+            'success': True,
+            'today': timezone.localdate().isoformat(),
+            'is_sunday': timezone.localdate().weekday() == 6,
+            'current': {
+                'id': current.id,
+                'week_start': current.week_start.isoformat(),
+                'week_end': current.week_end.isoformat(),
+                'summary': current.get_summary(),
+                'ai_comment': current.ai_comment,
+                'created_at': current.created_at.strftime('%Y-%m-%d %H:%M'),
+            } if current else None,
+            'history': history,
+        })
+
+    # POST：生成（或重新生成）本周报告
+    try:
+        settings_obj = UserSettings.get_settings()
+        cfg = resolve_ai_model({'model_id': settings_obj.assistant_model_id} if settings_obj.assistant_model_id else {})
+        summary = _collect_report_summary(week_start, week_end)
+        prompt = weekly_report_prompt(json.dumps(summary, ensure_ascii=False))
+        comment = _ai_chat_once(cfg, prompt, max_tokens=1000)
+        report, _ = LearningReport.objects.update_or_create(
+            week_start=week_start,
+            defaults={
+                'week_end': week_end,
+                'summary_json': json.dumps(summary, ensure_ascii=False),
+                'ai_comment': comment,
+            },
+        )
+        return JsonResponse({
+            'success': True,
+            'id': report.id,
+            'summary': summary,
+            'ai_comment': comment,
+            'created_at': report.created_at.strftime('%Y-%m-%d %H:%M'),
+        })
+    except ValueError as e:
+        return JsonResponse({'error': str(e)}, status=400)
+    except Exception as e:
+        return JsonResponse({'error': f'生成失败：{e}'}, status=500)
 
 
 @csrf_exempt
@@ -1288,13 +1776,35 @@ def api_restore(request):
 
 
 @csrf_exempt
-@require_http_methods(['POST'])
+@require_http_methods(['GET', 'POST'])
 def api_settings(request):
+    if request.method == 'GET':
+        settings_obj = UserSettings.get_settings()
+        return JsonResponse({
+            'success': True,
+            'assistant_model_id': settings_obj.assistant_model_id,
+            'recognize_model_id': settings_obj.recognize_model_id,
+            'review_model_id': settings_obj.review_model_id,
+            'quick_memory_model_id': settings_obj.quick_memory_model_id,
+            'meaning_check_model_id': settings_obj.meaning_check_model_id,
+            'use_ai_meaning_check': settings_obj.use_ai_meaning_check,
+        })
     try:
         data = json.loads(request.body)
         settings_obj = UserSettings.get_settings()
         for k, v in data.items():
-            if hasattr(settings_obj, k):
+            if not hasattr(settings_obj, k):
+                continue
+            field = settings_obj._meta.get_field(k)
+            if field.is_relation and field.many_to_one:
+                if v is None or v == '':
+                    setattr(settings_obj, k, None)
+                else:
+                    try:
+                        setattr(settings_obj, k, field.related_model.objects.get(pk=int(v)))
+                    except (field.related_model.DoesNotExist, ValueError, TypeError):
+                        return JsonResponse({'error': '指定的模型不存在'}, status=400)
+            else:
                 setattr(settings_obj, k, v)
         settings_obj.save()
         return JsonResponse({'success': True})
@@ -1368,6 +1878,10 @@ def api_quick_memory_generate(request, word_id):
     existing = QuickMemory.objects.filter(word=word).first()
     if existing and existing.content and not data.get('force'):
         return JsonResponse({'success': True, 'content': existing.content, 'cached': True})
+
+    settings_obj = UserSettings.get_settings()
+    if settings_obj.quick_memory_model and not data.get('model_id'):
+        data['model_id'] = settings_obj.quick_memory_model_id
 
     try:
         cfg = resolve_ai_model(data)
@@ -1534,6 +2048,221 @@ def api_assistant(request):
     return JsonResponse({'success': True, 'user_message': _ser(user_msg), 'assistant_message': _ser(ai_msg)})
 
 
+def ai_chat_page(request):
+    """AI 智能助手独立页面：全屏对话 + 文件上传 + 模型选择"""
+    models = AIModel.objects.filter(enabled=True).order_by('id')
+    settings_obj = UserSettings.get_settings()
+    current_model = settings_obj.assistant_model or models.first()
+    return render(request, 'ai_chat.html', {
+        'models': models,
+        'current_model': current_model,
+    })
+
+
+def _ser_chat_msg(m):
+    """ChatMessage → 前端 JSON"""
+    return {
+        'id': m.id,
+        'role': m.role,
+        'content': m.content,
+        'attachments': m.attachments or [],
+        'created_at': timezone.localtime(m.created_at).strftime('%Y-%m-%d %H:%M'),
+    }
+
+
+def _ser_conversation(c):
+    """Conversation → 前端 JSON"""
+    return {
+        'id': c.id,
+        'title': c.title,
+        'message_count': ChatMessage.objects.filter(conversation_id=c.id).count(),
+        'updated_at': timezone.localtime(c.updated_at).strftime('%m-%d %H:%M'),
+    }
+
+
+def api_ai_chat(request):
+    """AI 智能助手 API（多会话）：
+    GET    /api/ai/chat/                     → 启用模型列表 + 会话列表 + 最近会话的消息
+    GET    /api/ai/chat/?conversation_id=X   → 指定会话的消息
+    POST   /api/ai/chat/                     → 发送消息（conversation_id 缺省时自动新建会话）
+    DELETE /api/ai/chat/?conversation_id=X   → 清空指定会话的记录；缺省清空全部
+    """
+    if request.method == 'GET':
+        models = AIModel.objects.filter(enabled=True).order_by('id')
+        conversations = Conversation.objects.all()
+
+        conv_id = request.GET.get('conversation_id')
+        if conv_id:
+            try:
+                current_conv = Conversation.objects.get(id=int(conv_id))
+            except (Conversation.DoesNotExist, ValueError, TypeError):
+                current_conv = conversations.first()
+        else:
+            current_conv = conversations.first()
+
+        if current_conv:
+            msgs = ChatMessage.objects.filter(conversation_id=current_conv.id).order_by('id')
+        else:
+            msgs = ChatMessage.objects.none()
+
+        return JsonResponse({
+            'success': True,
+            'models': [serialize_ai_model(m) for m in models],
+            'conversations': [_ser_conversation(c) for c in conversations],
+            'current_conversation_id': current_conv.id if current_conv else None,
+            'messages': [_ser_chat_msg(m) for m in msgs],
+        })
+
+    if request.method == 'DELETE':
+        conv_id = request.GET.get('conversation_id')
+        if conv_id:
+            try:
+                conv = Conversation.objects.get(id=int(conv_id))
+            except (Conversation.DoesNotExist, ValueError, TypeError):
+                return JsonResponse({'error': '会话不存在'}, status=404)
+            ChatMessage.objects.filter(conversation_id=conv.id).delete()
+        else:
+            ChatMessage.objects.all().delete()
+        return JsonResponse({'success': True})
+
+    # ---- POST：对话 ----
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        data = {}
+    user_text = (data.get('message') or '').strip()
+    if not user_text and not data.get('files'):
+        return JsonResponse({'error': '消息不能为空'}, status=400)
+
+    # 会话：指定 ID 则复用，否则新建
+    conv_id = data.get('conversation_id')
+    conv = None
+    if conv_id:
+        try:
+            conv = Conversation.objects.get(id=int(conv_id))
+        except (Conversation.DoesNotExist, ValueError, TypeError):
+            return JsonResponse({'error': '会话不存在，请刷新重试'}, status=404)
+    if conv is None:
+        conv = Conversation.objects.create(
+            title=(user_text or '（文件）')[:30] or '新对话')
+
+    # 模型选择：前端指定 model_id（数据库记录）> 设置页小助手模型 > 第一个启用模型
+    settings_obj = UserSettings.get_settings()
+    chosen_id = data.get('model_id')
+    if not chosen_id and settings_obj.assistant_model_id:
+        chosen_id = settings_obj.assistant_model_id
+    try:
+        cfg = resolve_ai_model({'model_id': chosen_id} if chosen_id else {})
+    except ValueError as e:
+        conv.delete()  # 新建但模型不可用 → 回滚会话
+        return JsonResponse({'error': str(e)}, status=400)
+
+    # 解析文件附件：图片 → data URI（视觉模型）；文本/其它 → 截断文本
+    files = data.get('files') or []
+    content_parts = []
+    file_notes = []
+    for f in files[:8]:  # 最多 8 个附件
+        name = (f.get('name') or '附件').strip()[:120]
+        mime = (f.get('mime') or '').lower()
+        raw = f.get('content') or ''
+        if mime.startswith('image/') and raw:
+            content_parts.append({
+                'type': 'image_url',
+                'image_url': {'url': 'data:%s;base64,%s' % (mime, raw)},
+            })
+            file_notes.append({'name': name, 'type': 'image', 'mime': mime})
+        else:
+            try:
+                text = raw if isinstance(raw, str) else base64.b64decode(raw).decode('utf-8', 'ignore')
+            except Exception:
+                text = ''
+            text = text[:50000]
+            content_parts.append({'type': 'text', 'text': '【文件：%s】\n%s' % (name, text)})
+            file_notes.append({'name': name, 'type': 'text'})
+
+    if user_text:
+        content_parts.append({'type': 'text', 'text': user_text})
+    if not content_parts:
+        return JsonResponse({'error': '无法解析附件内容'}, status=400)
+
+    # 构造消息链：系统提示 + 本会话最近 20 条历史 + 当前消息（含附件）
+    messages = [{'role': 'system', 'content': ASSISTANT_SYSTEM_PROMPT}]
+    for m in ChatMessage.objects.filter(conversation_id=conv.id).order_by('-id')[:20][::-1]:
+        messages.append({'role': m.role, 'content': m.content[:2000]})
+
+    user_msg = ChatMessage.objects.create(
+        role='user',
+        content=user_text or '（已发送 %d 个文件）' % len(file_notes),
+        conversation_id=conv.id,
+        attachments=file_notes,
+    )
+
+    payload = {
+        'model': cfg['model_id'],
+        'temperature': 0.7,
+        'max_tokens': 2000,
+        'messages': messages + [{'role': 'user', 'content': content_parts}],
+    }
+
+    req = urllib.request.Request(
+        resolve_ai_endpoint(cfg['base_url'], cfg['endpoint']),
+        data=json.dumps(payload).encode('utf-8'),
+        headers=build_ai_headers(cfg['api_key']),
+        method='POST',
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8', 'ignore')
+        user_msg.delete()
+        if not ChatMessage.objects.filter(conversation_id=conv.id).exists():
+            conv.delete()  # 新建会话无消息 → 回滚
+        return JsonResponse({'error': 'AI 接口错误 (HTTP %s): %s' % (e.code, body[:400])}, status=502)
+    except urllib.error.URLError as e:
+        user_msg.delete()
+        if not ChatMessage.objects.filter(conversation_id=conv.id).exists():
+            conv.delete()
+        return JsonResponse({'error': '无法连接 AI 服务: %s' % e.reason}, status=502)
+
+    content = (result.get('choices', [{}])[0].get('message', {}).get('content', '') or '').strip()
+    if not content:
+        user_msg.delete()
+        if not ChatMessage.objects.filter(conversation_id=conv.id).exists():
+            conv.delete()
+        return JsonResponse({'error': 'AI 未返回有效内容'}, status=502)
+
+    ai_msg = ChatMessage.objects.create(
+        role='assistant', content=content, conversation_id=conv.id)
+
+    return JsonResponse({
+        'success': True,
+        'conversation': _ser_conversation(conv),
+        'user_message': _ser_chat_msg(user_msg),
+        'assistant_message': _ser_chat_msg(ai_msg),
+    })
+
+
+@require_http_methods(['POST'])
+def api_ai_chat_new(request):
+    """新建 AI 会话"""
+    conv = Conversation.objects.create(title='新对话')
+    return JsonResponse({'success': True, 'conversation': _ser_conversation(conv)})
+
+
+@require_http_methods(['DELETE'])
+def api_ai_chat_delete(request, conv_id):
+    """删除 AI 会话（连同其消息记录）"""
+    try:
+        conv = Conversation.objects.get(id=conv_id)
+    except Conversation.DoesNotExist:
+        return JsonResponse({'error': '会话不存在'}, status=404)
+    ChatMessage.objects.filter(conversation_id=conv.id).delete()
+    conv.delete()
+    return JsonResponse({'success': True})
+
+
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
 def api_assistant_model(request):
@@ -1595,6 +2324,9 @@ def api_learn_words(request):
     query = Word.objects.all()
     if unit_ids:
         query = query.filter(unit__number__in=unit_ids)
+
+    # 永不忘记的词不再出现
+    query = query.exclude(progress__is_excluded=True)
 
     if scope == 'mastered':
         query = query.filter(progress__status='mastered')
@@ -1677,6 +2409,32 @@ def api_exam_words(request):
     questions = []
     for w in words:
         meanings = w.get_meanings()
+        if direction == 'spelling':
+            # 拼写默写：看中文写英文（本地判定）
+            questions.append({
+                'id': w.id,
+                'word': w.word,
+                'phonetic_us': w.phonetic_us,
+                'pos': w.pos,
+                'prompt': '；'.join(meanings) if meanings else w.word,
+                'options': [],
+                'correct_index': None,
+                'type': 'spelling',
+            })
+            continue
+        if direction == 'meaning':
+            # 释义默写：看英文写中文（AI 判定）
+            questions.append({
+                'id': w.id,
+                'word': w.word,
+                'phonetic_us': w.phonetic_us,
+                'pos': w.pos,
+                'prompt': w.word,
+                'options': [],
+                'correct_index': None,
+                'type': 'meaning',
+            })
+            continue
         if direction == 'en2zh':
             if not meanings:
                 continue
@@ -1701,12 +2459,13 @@ def api_exam_words(request):
                       else ('；'.join(meanings) if meanings else w.word),
             'options': options,
             'correct_index': correct_index,
+            'type': 'choice',
         })
 
     # 存入 session 供交卷时评分
     request.session['exam_direction'] = direction
     request.session['exam_questions'] = [
-        {'id': q['id'], 'options': q['options'], 'correct_index': q['correct_index']}
+        {'id': q['id'], 'options': q['options'], 'correct_index': q['correct_index'], 'type': q.get('type', 'choice')}
         for q in questions
     ]
 
@@ -1733,7 +2492,7 @@ def api_exam_submit(request):
         if not stored:
             return JsonResponse({'error': '考试已过期，请重新开始'}, status=400)
 
-        answer_map = {a['word_id']: a.get('selected') for a in answers}
+        answer_map = {a['word_id']: a for a in answers}
 
         today = timezone.localdate()
         now = timezone.now()
@@ -1743,18 +2502,41 @@ def api_exam_submit(request):
         correct_count = 0
         for sq in stored:
             qid = sq['id']
-            correct_index = sq['correct_index']
-            selected = answer_map.get(qid)
-            is_correct = (selected == correct_index)
+            qtype = sq.get('type', 'choice')
+            ans = answer_map.get(qid) or {}
+            word = Word.objects.filter(id=qid).first()
+            is_correct = False
+            comment = ''
+
+            if qtype == 'spelling':
+                text = (ans.get('answer') or '').strip()
+                is_correct = bool(word) and bool(text) and _normalize_spelling(text) == _normalize_spelling(word.word)
+            elif qtype == 'meaning':
+                text = (ans.get('answer') or '').strip()
+                if word:
+                    verdict, comment, _used = _judge_meaning_answer(word, text, data)
+                    is_correct = verdict == 'correct'
+            else:
+                correct_index = sq['correct_index']
+                selected = ans.get('selected')
+                is_correct = (selected == correct_index)
+
             if is_correct:
                 correct_count += 1
 
-            word = Word.objects.filter(id=qid).first()
             if word:
                 progress, _ = StudyProgress.objects.get_or_create(word=word)
                 if progress.status == 'new':
                     progress.learned_date = today
                     progress.is_today_new = True
+                if qtype == 'spelling':
+                    progress.spelling_attempts += 1
+                    if is_correct:
+                        progress.spelling_correct += 1
+                elif qtype == 'meaning':
+                    progress.meaning_attempts += 1
+                    if is_correct:
+                        progress.meaning_correct += 1
                 if is_correct:
                     # 答对 → 会
                     progress.mastery_level = 5
@@ -1774,14 +2556,19 @@ def api_exam_submit(request):
                     'word': word.word,
                     'meanings': word.get_meanings(),
                     'correct': is_correct,
-                    'selected_index': selected,
-                    'correct_index': correct_index,
+                    'selected_index': ans.get('selected'),
+                    'correct_index': sq.get('correct_index'),
+                    'type': qtype,
+                    'comment': comment,
+                    'answer': ans.get('answer') or '',
                 })
             else:
                 results.append({
                     'word_id': qid, 'word': '?', 'meanings': [],
-                    'correct': is_correct, 'selected_index': selected,
-                    'correct_index': correct_index,
+                    'correct': is_correct, 'selected_index': ans.get('selected'),
+                    'correct_index': sq.get('correct_index'),
+                    'type': qtype,
+                    'answer': ans.get('answer') or '',
                 })
 
         checkin.save()
@@ -2006,13 +2793,17 @@ def api_word_bulk_import(request):
 
         next_list_number = (unit.words.aggregate(m=Max('list_number'))['m'] or 0) + 1
 
+        # 批量预取已存在单词（小写集合），避免逐词 N+1 查询
+        existing_lower = {w.lower() for w in Word.objects.values_list('word', flat=True)}
+
         for wd in words_data:
             nd = normalize_word_data(wd)
             if not nd:
                 continue
-            if Word.objects.filter(word__iexact=nd['word']).exists():
+            if nd['word'].lower() in existing_lower:
                 skipped += 1
                 continue
+            existing_lower.add(nd['word'].lower())
 
             word = Word.objects.create(
                 word=nd['word'],
@@ -2048,16 +2839,24 @@ def api_word_bulk_import(request):
             words_list=json.dumps(imported_words, ensure_ascii=False),
         )
 
-        # 导入后自动 AI 补全（按词性释义 + 例句），失败不影响导入结果
-        try:
-            ai_complete_words(new_word_objs)
-        except Exception:
-            pass
+        # 导入后自动 AI 补全（按词性释义 + 例句）改为后台异步执行：
+        # 不让用户卡在导入按钮上，补全结果稍后自动出现在词库中；失败不影响导入结果。
+        if new_word_objs:
+            def _async_complete(objs):
+                close_old_connections()
+                try:
+                    ai_complete_words(objs)
+                except Exception:
+                    pass
+                finally:
+                    close_old_connections()
+            threading.Thread(target=_async_complete, args=(new_word_objs,), daemon=True).start()
 
         return JsonResponse({
             'success': True,
             'imported': imported,
             'skipped': skipped,
+            'completing': bool(new_word_objs),
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
@@ -2385,12 +3184,20 @@ def ai_complete_words(word_objs):
     """导入后自动 AI 补全：为缺按词性释义 / 例句的单词批量生成（失败静默，不影响导入结果）"""
     if not word_objs:
         return
-    need_pos = [w for w in word_objs if not w.get_meanings_by_pos()]
+    # 需要按词性归类的：没有按词性释义，或全部被归到「未分类」
+    need_pos = [
+        w for w in word_objs
+        if not w.get_meanings_by_pos() or all(k == '未分类' for k in w.get_meanings_by_pos())
+    ]
     need_ex = [w for w in word_objs if not w.example_en.strip()]
     if not need_pos and not need_ex:
         return
+    settings_obj = UserSettings.get_settings()
+    model_data = {}
+    if settings_obj.recognize_model:
+        model_data['model_id'] = settings_obj.recognize_model_id
     try:
-        cfg = resolve_ai_model({})
+        cfg = resolve_ai_model(model_data)
     except ValueError:
         return
     batch = 30
@@ -2442,8 +3249,14 @@ def resolve_ai_endpoint(base_url, endpoint):
 
 
 def build_ai_headers(api_key):
-    """构造请求头；无密钥时省略 Authorization（本机无鉴权服务如 opencode）"""
-    headers = {'Content-Type': 'application/json'}
+    """构造请求头；无密钥时省略 Authorization（本机无鉴权服务如 opencode）。
+    部分中转服务商（Codex2API 等）前端挂了 Cloudflare，会把 Python-urllib UA 拦成 502，
+    这里统一填充浏览器 UA 以保证兼容性。"""
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    }
     if api_key and api_key.strip():
         headers['Authorization'] = 'Bearer ' + api_key.strip()
     return headers
@@ -2567,6 +3380,10 @@ def api_ai_recognize(request):
         file_content = data.get('file_content', '')
         file_name = data.get('file_name', '')
 
+        settings_obj = UserSettings.get_settings()
+        if settings_obj.recognize_model and not data.get('model_id'):
+            data['model_id'] = settings_obj.recognize_model_id
+
         try:
             cfg = resolve_ai_model(data)
         except ValueError as e:
@@ -2646,6 +3463,10 @@ def api_ai_review(request):
     try:
         data = json.loads(request.body)
         words = data.get('words', [])
+
+        settings_obj = UserSettings.get_settings()
+        if settings_obj.review_model and not data.get('model_id'):
+            data['model_id'] = settings_obj.review_model_id
 
         try:
             cfg = resolve_ai_model(data)

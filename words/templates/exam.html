@@ -36,6 +36,8 @@
     <div class="flex flex-col gap-2">
       <label class="flex items-center gap-2"><input type="radio" name="examDirection" value="en2zh" checked><span>英译中 <span class="text-secondary text-sm">（看单词选中文释义）</span></span></label>
       <label class="flex items-center gap-2"><input type="radio" name="examDirection" value="zh2en"><span>中译英 <span class="text-secondary text-sm">（看中文释义选单词）</span></span></label>
+      <label class="flex items-center gap-2"><input type="radio" name="examDirection" value="spelling"><span>拼写默写 <span class="text-secondary text-sm">（看中文写英文）</span></span></label>
+      <label class="flex items-center gap-2"><input type="radio" name="examDirection" value="meaning"><span>释义默写 <span class="text-secondary text-sm">（看英文写中文，AI 判定）</span></span></label>
     </div>
   </div>
 
@@ -290,6 +292,7 @@ function renderQuestion() {
   const q = examState.questions[examCurrent];
   const total = examState.questions.length;
   const dir = examState.config.direction;
+  const isType = dir === 'spelling' || dir === 'meaning';
 
   document.getElementById('examQIndex').textContent = examCurrent + 1;
   document.getElementById('examProgress').style.width = ((examCurrent + 1) / total * 100) + '%';
@@ -300,26 +303,61 @@ function renderQuestion() {
     label.textContent = '选择正确的中文释义';
     main.innerHTML = '<div class="exam-word">' + escapeHtml(q.word) + '</div>' +
       '<div class="exam-sub">' + escapeHtml(q.phonetic_us || '') + (q.pos ? ' · ' + escapeHtml(q.pos) : '') + '</div>';
+  } else if (dir === 'spelling') {
+    label.textContent = '拼写默写：根据中文释义写出英文单词';
+    main.innerHTML = '<div class="exam-word" style="font-size:1.5rem;">' + escapeHtml(q.prompt) + '</div>';
+  } else if (dir === 'meaning') {
+    label.textContent = '释义默写：写出这个单词的中文意思';
+    main.innerHTML = '<div class="exam-word">' + escapeHtml(q.word) + '</div>' +
+      '<div class="exam-sub">' + escapeHtml(q.phonetic_us || '') + (q.pos ? ' · ' + escapeHtml(q.pos) : '') + '</div>';
   } else {
     label.textContent = '选择正确的英文单词';
     main.innerHTML = '<div class="exam-word" style="font-size:1.5rem;">' + escapeHtml(q.prompt) + '</div>';
   }
 
-  const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
   const optsEl = document.getElementById('examOptions');
   optsEl.innerHTML = '';
-  q.options.forEach((opt, i) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'exam-option' + (examState.answers[q.id] === i ? ' sel' : '');
-    btn.innerHTML = '<span class="exam-letter">' + letters[i] + '</span><span>' + escapeHtml(opt) + '</span>';
-    btn.onclick = function () { selectOption(i); };
-    optsEl.appendChild(btn);
-  });
+  if (isType) {
+    const saved = examState.answers[q.id] !== undefined ? examState.answers[q.id] : '';
+    optsEl.innerHTML = '<div class="flex gap-2">' +
+      '<input type="text" id="examTypeInput" class="form-input" style="flex:1; font-size:1rem; padding:12px 14px;" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="' + (dir === 'spelling' ? '输入英文单词' : '输入中文释义') + '" value="' + escapeHtml(String(saved)) + '">' +
+      '<button type="button" class="btn btn-primary" id="examTypeSaveBtn" style="min-width:110px;">' + (String(saved).trim() ? '已答 ✓' : '保存答案') + '</button>' +
+      '</div>';
+    const input = document.getElementById('examTypeInput');
+    const saveBtn = document.getElementById('examTypeSaveBtn');
+    saveBtn.onclick = function () { saveTypeAnswer(); };
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); saveTypeAnswer(); }
+    });
+    setTimeout(function () { input.focus(); }, 50);
+  } else {
+    const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
+    q.options.forEach((opt, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'exam-option' + (examState.answers[q.id] === i ? ' sel' : '');
+      btn.innerHTML = '<span class="exam-letter">' + letters[i] + '</span><span>' + escapeHtml(opt) + '</span>';
+      btn.onclick = function () { selectOption(i); };
+      optsEl.appendChild(btn);
+    });
+  }
 
   document.getElementById('examNextBtn').innerHTML = examCurrent === total - 1
     ? '交卷 <i class="ph ph-paper-plane-tilt"></i>'
     : '下一题 <i class="ph ph-arrow-right"></i>';
+  renderNavigator();
+}
+
+function saveTypeAnswer() {
+  const q = examState.questions[examCurrent];
+  if (!q) return;
+  const input = document.getElementById('examTypeInput');
+  if (!input) return;
+  const val = input.value.trim();
+  examState.answers[q.id] = val;
+  saveExamState();
+  const saveBtn = document.getElementById('examTypeSaveBtn');
+  if (saveBtn) saveBtn.innerHTML = val ? '已答 ✓' : '保存答案';
   renderNavigator();
 }
 
@@ -341,9 +379,12 @@ function renderNavigator() {
   const nav = document.getElementById('examNavigator');
   nav.innerHTML = '';
   const total = examState.questions.length;
+  const isType = examState.config.direction === 'spelling' || examState.config.direction === 'meaning';
   let answered = 0;
   examState.questions.forEach((q, i) => {
-    const has = examState.answers[q.id] !== undefined;
+    const has = isType
+      ? (examState.answers[q.id] !== undefined && String(examState.answers[q.id]).trim() !== '')
+      : examState.answers[q.id] !== undefined;
     if (has) answered++;
     const d = document.createElement('div');
     d.className = 'exam-dot' + (has ? ' answered' : '') + (i === examCurrent ? ' current' : '');
@@ -381,10 +422,13 @@ async function submitExam() {
   if (examTimerInt) { clearInterval(examTimerInt); examTimerInt = null; }
 
   const duration = Math.floor((Date.now() - examState.start) / 1000);
-  const answers = examState.questions.map(q => ({
-    word_id: q.id,
-    selected: examState.answers[q.id] !== undefined ? examState.answers[q.id] : null,
-  }));
+  const isType = examState.config.direction === 'spelling' || examState.config.direction === 'meaning';
+  const answers = examState.questions.map(q => {
+    if (isType) {
+      return { word_id: q.id, answer: examState.answers[q.id] !== undefined ? examState.answers[q.id] : '' };
+    }
+    return { word_id: q.id, selected: examState.answers[q.id] !== undefined ? examState.answers[q.id] : null };
+  });
 
   const btn = document.querySelector('#examAnswer .btn-danger');
   btn.disabled = true;
@@ -431,16 +475,27 @@ function renderResult(res) {
   wrong.forEach(r => {
     const q = qmap[r.word_id] || {};
     const opts = q.options || [];
-    const your = r.selected_index !== null && r.selected_index !== undefined ? opts[r.selected_index] : '（未作答）';
     const item = document.createElement('div');
     item.className = 'exam-wrong-item';
+    let correctHtml, your, extraHtml = '';
+    if (r.type === 'spelling' || r.type === 'meaning') {
+      your = r.answer !== undefined && String(r.answer).trim() ? r.answer : '（未作答）';
+      correctHtml = r.type === 'spelling'
+        ? '正确：<span class="ans-right">' + escapeHtml(r.word) + '</span>'
+        : '正确：<span class="ans-right">' + escapeHtml((r.meanings || []).join('；')) + '</span>';
+      if (r.comment) extraHtml = '<div class="text-sm" style="margin-top:4px;">' + escapeHtml(r.comment) + '</div>';
+    } else {
+      your = r.selected_index !== null && r.selected_index !== undefined ? opts[r.selected_index] : '（未作答）';
+      correctHtml = '正确：<span class="ans-right">' + escapeHtml(opts[r.correct_index] || '') + '</span>';
+    }
     item.innerHTML =
       '<div class="flex justify-between items-center mb-2">' +
         '<strong>' + escapeHtml(r.word) + '</strong>' +
         '<span class="text-sm text-secondary">已标记为「不会」</span>' +
       '</div>' +
-      '<div class="text-sm">正确：<span class="ans-right">' + escapeHtml(opts[r.correct_index] || '') + '</span></div>' +
-      '<div class="text-sm">你的选择：<span class="ans-wrong">' + escapeHtml(String(your)) + '</span></div>';
+      '<div class="text-sm">' + correctHtml + '</div>' +
+      '<div class="text-sm">你的答案：<span class="ans-wrong">' + escapeHtml(String(your)) + '</span></div>' +
+      extraHtml;
     list.appendChild(item);
   });
 }
