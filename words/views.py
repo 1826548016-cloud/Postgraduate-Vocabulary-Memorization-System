@@ -3,6 +3,7 @@ import os
 import random
 import re
 import shutil
+import subprocess
 import threading
 import time
 import urllib.request
@@ -12,9 +13,10 @@ from datetime import date, timedelta, datetime
 from io import BytesIO
 
 from django.conf import settings
+from django.core.paginator import Paginator
 from django.db import close_old_connections
 from django.db.models import Q, Count, Sum, Avg, F, Max
-from django.http import JsonResponse, HttpResponse, FileResponse
+from django.http import JsonResponse, HttpResponse, FileResponse, Http404
 from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
 from django.db import IntegrityError
@@ -22,7 +24,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from .models import (Unit, Word, StudyProgress, StudyPlan,
-                     DailyCheckIn, Favorite, Note, QuickMemory, AIModel, StudySession, UserSettings, ChatMessage, ImportLog, Conversation, LearningReport)
+                     DailyCheckIn, Favorite, Note, QuickMemory, AIModel, StudySession, UserSettings, ChatMessage, ImportLog, Conversation, LearningReport, StudyRecord, PdfDocument, Music)
 from .ai_prompts import (
     quick_memory_prompt, ASSISTANT_SYSTEM_PROMPT, assistant_word_context,
     pos_grouping_prompt, examples_prompt,
@@ -201,7 +203,11 @@ def learn_start(request):
     active_plan = StudyPlan.objects.filter(is_active=True).first()
     if active_plan:
         plan_today = _get_plan_today_data(active_plan, today)
-    return render(request, 'learn_start.html', {'units': units, 'plan_today': plan_today})
+    settings_obj = UserSettings.get_settings()
+    return render(request, 'learn_start.html', {
+        'units': units, 'plan_today': plan_today, 'batch_size': settings_obj.batch_size,
+        'batch_options': [10, 20, 30, 50],
+    })
 
 
 def learn_session(request):
@@ -209,6 +215,12 @@ def learn_session(request):
     check = request.GET.get('check', 'none')
     unit_ids = request.GET.getlist('units')
     scope = request.GET.get('scope', 'unknown')
+
+    settings_obj = UserSettings.get_settings()
+    try:
+        batch_size = max(1, min(int(request.GET.get('batch') or settings_obj.batch_size), 100))
+    except (TypeError, ValueError):
+        batch_size = settings_obj.batch_size
 
     query = Word.objects.all()
     if unit_ids:
@@ -261,6 +273,8 @@ def learn_session(request):
         'word_count': len(word_data),
         'mode': mode,
         'check': check,
+        'batch_size': batch_size,
+        'gate_answer_show': settings_obj.gate_answer_show,
         'words_json': json.dumps(word_data, ensure_ascii=False),
     })
 
@@ -270,7 +284,11 @@ def review_start(request):
     units = Unit.objects.annotate(
         mastered=Count('words__progress', filter=Q(words__progress__status='mastered'))
     ).all()
-    return render(request, 'review_start.html', {'units': units})
+    settings_obj = UserSettings.get_settings()
+    return render(request, 'review_start.html', {
+        'units': units, 'batch_size': settings_obj.batch_size,
+        'batch_options': [10, 20, 30, 50],
+    })
 
 
 def review_session(request):
@@ -299,6 +317,12 @@ def review_session(request):
             target = max(1, min(int(request.GET.get('count')), 500))
         except (TypeError, ValueError):
             pass
+
+    # 每批数量
+    try:
+        batch_size = max(1, min(int(request.GET.get('batch') or settings_obj.batch_size), 100))
+    except (TypeError, ValueError):
+        batch_size = settings_obj.batch_size
 
     query = StudyProgress.objects.exclude(status='new').select_related('word')
     # 永不忘记的词（is_excluded）不再出现
@@ -369,6 +393,7 @@ def review_session(request):
         'total_due': len(all_progress),  # 范围内可抽取的已学词总数
         'remaining_due': max(0, len(all_progress) - len(batch)),
         'daily_review_target': settings_obj.daily_review_target,
+        'batch_size': batch_size,
         'batch_date': today.isoformat(),
         'unmastered_in_batch': unmastered_count,
         'mastered_in_batch': mastered_count,
@@ -378,11 +403,91 @@ def review_session(request):
         'random_count': target,
         'scope': scope,
         'units_param': units_param,
+        'gate_answer_show': settings_obj.gate_answer_show,
     })
 
 
 def statistics(request):
     return render(request, 'stats.html')
+
+
+def history(request):
+    """背词历史记录：按天分组的时间线 + 统计 + 近 30 天趋势 + 筛选"""
+    today = timezone.localdate()
+    source = request.GET.get('source', 'all')
+    action = request.GET.get('action', 'all')
+    days = request.GET.get('days', '30')
+
+    qs = StudyRecord.objects.select_related('word').all()
+    if source in ('learn', 'review', 'favorite'):
+        qs = qs.filter(source=source)
+    if action in dict(StudyRecord.ACTION_CHOICES):
+        qs = qs.filter(action=action)
+
+    ok_actions = ('known', 'spelling_ok', 'meaning_ok')
+
+    # 累计与今日统计
+    total = qs.count()
+    today_qs = qs.filter(created_at__date=today)
+    today_total = today_qs.count()
+    ok_count = qs.filter(action__in=ok_actions).count()
+    today_ok = today_qs.filter(action__in=ok_actions).count()
+    correct_rate = round(ok_count / total * 100, 1) if total else 0
+    today_rate = round(today_ok / today_total * 100, 1) if today_total else 0
+
+    # 连续打卡天数（从 DailyCheckIn 推算）
+    streak = 0
+    d = today
+    while DailyCheckIn.objects.filter(date=d, is_checked=True).exists():
+        streak += 1
+        d -= timedelta(days=1)
+
+    # 近 30 天趋势
+    start = today - timedelta(days=int(days) - 1 if days.isdigit() else 29)
+    rows = (qs.filter(created_at__date__gte=start)
+              .values('created_at__date')
+              .annotate(total=Count('id'), ok=Count('id', filter=Q(action__in=ok_actions)))
+              .order_by('created_at__date'))
+    by_date = {r['created_at__date']: r for r in rows}
+    n_days = (today - start).days + 1
+    trend = []
+    for i in range(n_days):
+        d = start + timedelta(days=i)
+        r = by_date.get(d)
+        trend.append({
+            'date': d.isoformat(),
+            'label': d.strftime('%m-%d'),
+            'total': r['total'] if r else 0,
+            'ok': r['ok'] if r else 0,
+            'rate': round(r['ok'] / r['total'] * 100, 1) if r and r['total'] else 0,
+        })
+
+    # 分页（每页 50 条，页面内按天分组）
+    paginator = Paginator(qs, 50)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    groups = {}
+    for rec in page_obj:
+        local_d = timezone.localtime(rec.created_at).date()
+        groups.setdefault(local_d, []).append(rec)
+    groups = sorted(groups.items(), key=lambda kv: kv[0], reverse=True)
+
+    context = {
+        'source': source,
+        'action': action,
+        'days': days,
+        'total': total,
+        'today_total': today_total,
+        'correct_rate': correct_rate,
+        'today_rate': today_rate,
+        'streak': streak,
+        'trend': trend,
+        'trend_max': max((t['total'] for t in trend), default=1),
+        'groups': groups,
+        'page_obj': page_obj,
+        'action_choices': StudyRecord.ACTION_CHOICES,
+    }
+    return render(request, 'history.html', context)
 
 
 def exam(request):
@@ -499,13 +604,6 @@ def weak_words(request):
     })
 
 
-def focus_mode(request):
-    units = Unit.objects.annotate(
-        mastered=Count('words__progress', filter=Q(words__progress__status='mastered'))
-    ).all()
-    return render(request, 'focus.html', {'units': units})
-
-
 # ─── API 视图 ───────────────────────────────────────────────
 
 def api_words(request):
@@ -617,6 +715,42 @@ def api_word_detail(request, word_id):
     return JsonResponse(data)
 
 
+def _record_study(word, action, data=None, mode=''):
+    """写一条背词历史记录；失败不影响主流程"""
+    try:
+        payload = data or {}
+        src = payload.get('source', 'learn')
+        if src not in ('learn', 'review', 'favorite'):
+            src = 'learn'
+        StudyRecord.objects.create(
+            word=word,
+            action=action,
+            source=src,
+            mode=(mode or payload.get('mode') or '')[:30],
+        )
+    except Exception:
+        pass
+
+
+CONSECUTIVE_THRESHOLD = 10
+
+
+def _track_consecutive(progress, correct):
+    """维护连续答对计数；连续答对达到阈值时自动标记为永不忘记（is_excluded）。
+
+    背诵/复习共用：答对 +1，答错清零；返回是否触发自动排除。
+    """
+    if correct:
+        progress.consecutive_correct += 1
+        if progress.consecutive_correct >= CONSECUTIVE_THRESHOLD:
+            progress.is_excluded = True
+            progress.status = 'mastered'
+            return True
+    else:
+        progress.consecutive_correct = 0
+    return False
+
+
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_mark_word(request, action, word_id):
@@ -633,10 +767,13 @@ def api_mark_word(request, action, word_id):
         if action == 'mastered':
             progress.mastery_level = 5
             progress.status = 'mastered'
+            auto_excluded = _track_consecutive(progress, True)
         elif action in ('fuzzy', 'unknown'):
             progress.mastery_level = 0
             progress.status = 'learning'
             progress.error_count += 1
+            _track_consecutive(progress, False)
+            auto_excluded = False
         else:
             return JsonResponse({'error': '无效操作'}, status=400)
 
@@ -652,6 +789,13 @@ def api_mark_word(request, action, word_id):
             checkin.today_wrong += 1
         checkin.save()
 
+        # 记录背词历史
+        try:
+            mark_data = json.loads(request.body or '{}')
+        except Exception:
+            mark_data = {}
+        _record_study(word, 'known' if action == 'mastered' else 'unknown', mark_data)
+
         auto_checked = update_daily_checkin()
 
         return JsonResponse({
@@ -659,6 +803,7 @@ def api_mark_word(request, action, word_id):
             'status': progress.status,
             'mastery_level': progress.mastery_level,
             'auto_checked': auto_checked,
+            'auto_excluded': auto_excluded,
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
@@ -673,6 +818,11 @@ def api_mark_skip(request, word_id):
         if progress.status == 'new':
             progress.status = 'mastered'  # 视为已掌握，保证统计口径一致
         progress.save()
+        try:
+            skip_data = json.loads(request.body or '{}')
+        except Exception:
+            skip_data = {}
+        _record_study(word, 'skip', skip_data)
         return JsonResponse({
             'success': True,
             'is_excluded': True,
@@ -708,12 +858,13 @@ MEANING_JUDGE_PROMPT = '''你是考研英语词汇老师，负责判定学生默
 学生的答案：{answer}
 
 请判定学生答案是否表达了该单词的核心含义：
-1. 只要学生答案大致表达了核心含义（同义词、近义表达、简洁概括、个别用词不准均可），就算「correct」，本模式要求宽松，大致对即可判对。
-2. 只有沾边但完全没写到点子上、或明显答非所问的，才算「partial」或「wrong」。
-3. 完全不对、明显错误、或与单词无关的，算「wrong」。
+1. 只要学生答案大致表达了核心含义（同义词、近义表达、简洁概括、个别用词不准均可，但不能有明显错误），就算「correct」，本模式要求宽松，大致对即可判对。
+2. 义项一致性检查（重点）：标准释义有几个义项，学生答案就要与这些义项一一对应。即使大部分义项都大致正确，只要学生答案中出现「与原词含义严重不符、明显是另一个意思」的义项（例如把“苹果”写成“香蕉”这类方向性错误），就必须判「wrong」，绝不能因整体大致对而放行。
+3. 只有沾边但完全没写到点子上、或明显答非所问的，才算「partial」或「wrong」。
+4. 完全不对、明显错误、或与单词无关的，算「wrong」。
 
 只输出 JSON，不要输出其他内容，格式：
-{{"verdict": "correct 或 partial 或 wrong", "comment": "一句话中文点评，指出对在哪或错在哪，并给出参考释义"}}
+{{"verdict": "correct 或 partial 或 wrong", "comment": "一句话中文点评，指出对在哪或错在哪，并给出参考释义。若因某个义项严重不符而判 wrong，必须明确指出学生写错的这一处内容、正确的参考义项、以及判错理由"}}
 '''
 
 
@@ -803,6 +954,7 @@ def api_spelling_check(request, word_id):
             progress.error_count += 1
             progress.mastery_level = 0
             progress.status = 'learning'
+        auto_excluded = _track_consecutive(progress, correct)
         progress.review_count += 1
         progress.last_review = now
         progress.save()
@@ -814,6 +966,9 @@ def api_spelling_check(request, word_id):
             checkin.today_wrong += 1
         checkin.save()
 
+        # 记录背词历史
+        _record_study(word, 'spelling_ok' if correct else 'spelling_wrong', data)
+
         auto_checked = update_daily_checkin()
 
         return JsonResponse({
@@ -821,6 +976,7 @@ def api_spelling_check(request, word_id):
             'correct': correct,
             'status': progress.status,
             'auto_checked': auto_checked,
+            'auto_excluded': auto_excluded,
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
@@ -845,7 +1001,8 @@ def api_meaning_check(request, word_id):
             progress.is_today_new = True
 
         progress.meaning_attempts += 1
-        if verdict in ('correct', 'partial'):
+        ok = verdict in ('correct', 'partial')
+        if ok:
             progress.meaning_correct += 1
             progress.mastery_level = 5
             progress.status = 'mastered'
@@ -853,16 +1010,20 @@ def api_meaning_check(request, word_id):
             progress.error_count += 1
             progress.mastery_level = 0
             progress.status = 'learning'
+        auto_excluded = _track_consecutive(progress, ok)
         progress.review_count += 1
         progress.last_review = now
         progress.save()
 
         checkin, _ = DailyCheckIn.objects.get_or_create(date=today)
-        if verdict in ('correct', 'partial'):
+        if ok:
             checkin.today_correct += 1
         else:
             checkin.today_wrong += 1
         checkin.save()
+
+        # 记录背词历史
+        _record_study(word, 'meaning_ok' if ok else 'meaning_wrong', data)
 
         auto_checked = update_daily_checkin()
 
@@ -873,6 +1034,7 @@ def api_meaning_check(request, word_id):
             'used_ai': used_ai,
             'status': progress.status,
             'auto_checked': auto_checked,
+            'auto_excluded': auto_excluded,
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
@@ -1483,7 +1645,16 @@ def api_export_pdf(request):
         if unit_num:
             query = query.filter(unit__number=int(unit_num))
         if status:
-            query = query.filter(progress__status=status)
+            # 与列表筛选保持一致：unknown=未会(excluded之外的)，excluded=永不忘记
+            if status == 'unknown':
+                query = query.filter(
+                    Q(progress__isnull=True) |
+                    Q(progress__status__in=['new', 'learning', 'reviewing'])
+                )
+            elif status == 'excluded':
+                query = query.filter(progress__is_excluded=True)
+            else:
+                query = query.filter(progress__status=status)
         words = query.order_by('unit__number', 'list_number')
         title_text = '考研单词表（筛选结果）'
     elif export_type == 'unit' and unit_num:
@@ -3688,3 +3859,353 @@ def api_ai_test(request):
         return JsonResponse({'error': '接口响应异常'}, status=502)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+# ==================== PDF 资料库 ====================
+
+def pdf_library(request):
+    """资料库列表页：展示已上传的 PDF，支持上传"""
+    pdfs = PdfDocument.objects.all().order_by('-uploaded_at')
+    return render(request, 'pdf_library.html', {'pdfs': pdfs})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def pdf_upload(request):
+    """上传 PDF 文件到资料库（按文件内容 MD5 去重）"""
+    try:
+        import hashlib
+        uploaded = request.FILES.get('file')
+        title = request.POST.get('title', '').strip()
+        if not uploaded:
+            return JsonResponse({'error': '请选择 PDF 文件'}, status=400)
+        if not uploaded.name.lower().endswith('.pdf'):
+            return JsonResponse({'error': '只支持 PDF 文件'}, status=400)
+        if uploaded.size > 50 * 1024 * 1024:
+            return JsonResponse({'error': '文件过大，请控制在 50MB 以内'}, status=400)
+
+        # 计算文件内容 MD5（分块读取，避免大文件爆内存）
+        hasher = hashlib.md5()
+        for chunk in uploaded.chunks():
+            hasher.update(chunk)
+        file_hash = hasher.hexdigest()
+        # 重置文件指针，供后续保存使用
+        try:
+            uploaded.seek(0)
+        except Exception:
+            pass
+
+        # 去重：相同内容（MD5 一致）直接拒绝
+        existing = PdfDocument.objects.filter(file_hash=file_hash).first()
+        if existing:
+            return JsonResponse({
+                'error': '该文件已上传过，资料库中已存在相同内容的文件',
+                'duplicate': True,
+                'existing_id': existing.id,
+                'existing_title': existing.title,
+            }, status=409)
+
+        if not title:
+            # 去掉 .pdf 后缀作为标题
+            title = uploaded.name[:-4] if uploaded.name.lower().endswith('.pdf') else uploaded.name
+
+        doc = PdfDocument.objects.create(
+            title=title[:200],
+            file=uploaded,
+            filesize=uploaded.size,
+            file_hash=file_hash,
+        )
+        return JsonResponse({'success': True, 'id': doc.id, 'title': doc.title})
+    except Exception as e:
+        return JsonResponse({'error': f'上传失败：{str(e)}'}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def pdf_delete(request, doc_id):
+    """删除一个 PDF 资料（同时删除文件）"""
+    try:
+        doc = get_object_or_404(PdfDocument, id=doc_id)
+        if doc.file:
+            try:
+                doc.file.delete(save=False)
+            except Exception:
+                pass
+        doc.delete()
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def pdf_update(request, doc_id):
+    """更新 PDF 资料：可重命名 title，可替换文件（仍做 MD5 去重）"""
+    try:
+        import hashlib
+        doc = get_object_or_404(PdfDocument, id=doc_id)
+        new_title = request.POST.get('title', '').strip()
+
+        if new_title:
+            doc.title = new_title[:200]
+
+        new_file = request.FILES.get('file')
+        if new_file:
+            if not new_file.name.lower().endswith('.pdf'):
+                return JsonResponse({'error': '只支持 PDF 文件'}, status=400)
+            if new_file.size > 50 * 1024 * 1024:
+                return JsonResponse({'error': '文件过大，请控制在 50MB 以内'}, status=400)
+
+            hasher = hashlib.md5()
+            for chunk in new_file.chunks():
+                hasher.update(chunk)
+            file_hash = hasher.hexdigest()
+            try:
+                new_file.seek(0)
+            except Exception:
+                pass
+
+            existing = PdfDocument.objects.filter(file_hash=file_hash).exclude(id=doc.id).first()
+            if existing:
+                return JsonResponse({
+                    'error': '该文件已存在于资料库中，请勿重复上传',
+                    'duplicate': True,
+                    'existing_id': existing.id,
+                    'existing_title': existing.title,
+                }, status=409)
+
+            if doc.file:
+                try:
+                    doc.file.delete(save=False)
+                except Exception:
+                    pass
+            doc.file = new_file
+            doc.filesize = new_file.size
+            doc.file_hash = file_hash
+
+        doc.save()
+        return JsonResponse({'success': True, 'id': doc.id, 'title': doc.title})
+    except Exception as e:
+        return JsonResponse({'error': f'更新失败：{str(e)}'}, status=500)
+
+
+def pdf_view(request, doc_id):
+    """PDF 在线阅读页：用 object 标签嵌入 PDF 阅读器"""
+    doc = get_object_or_404(PdfDocument, id=doc_id)
+    return render(request, 'pdf_view.html', {'doc': doc})
+
+
+@require_http_methods(['GET'])
+def pdf_serve(request, doc_id):
+    """流式服务 PDF 文件：返回正确的 Content-Type，跳过 X-Frame-Options"""
+    doc = get_object_or_404(PdfDocument, id=doc_id)
+    file_path = doc.file.path
+    try:
+        with open(file_path, 'rb') as f:
+            response = HttpResponse(f.read(), content_type='application/pdf')
+        response['Content-Disposition'] = 'inline; filename="' + doc.title.replace('"', '') + '.pdf"'
+        response['Content-Length'] = str(doc.filesize)
+        response['X-Frame-Options'] = 'SAMEORIGIN'
+        response['Cache-Control'] = 'max-age=3600'
+        return response
+    except FileNotFoundError:
+        raise Http404('文件不存在')
+
+
+# ==================== 音乐播放器 ====================
+
+def _ffmpeg_bin(name):
+    """优先取 settings 中配置的路径，其次从 PATH 查找"""
+    cfg = getattr(settings, name, None)
+    if cfg and os.path.exists(cfg):
+        return cfg
+    found = shutil.which(name.lower())
+    return found or name.lower()
+
+
+_AAC_OK = None
+
+
+def _has_aac_encoder():
+    """检测当前 ffmpeg 是否带 AAC 编码器（决定能否转码），结果缓存"""
+    global _AAC_OK
+    if _AAC_OK is not None:
+        return _AAC_OK
+    try:
+        ffmpeg = _ffmpeg_bin('FFMPEG_PATH')
+        r = subprocess.run([ffmpeg, '-encoders'], capture_output=True, text=True, timeout=30)
+        _AAC_OK = bool(re.search(r'\baac\b', r.stdout))
+    except Exception:
+        _AAC_OK = False
+    return _AAC_OK
+
+
+def _extract_audio(video_path, audio_path):
+    """从视频提取音轨生成音频文件。
+
+    优先直接复制音轨（copy，无需编码器，不损音质）；
+    若失败且 ffmpeg 支持 AAC 编码则转码；
+    返回 (成功与否, 诊断信息)。
+    """
+    ffmpeg = _ffmpeg_bin('FFMPEG_PATH')
+    if not os.path.exists(video_path):
+        return False, '源文件不存在'
+
+    def _ok(p):
+        return os.path.exists(p) and os.path.getsize(p) > 0
+
+    # 尝试 1：直接复制音轨（mp4/m4a 内常见 AAC，秒提取不损音质）
+    # 注意：精简版 ffmpeg 可能只启用 mp4 muxer，需显式 -f mp4 指定输出容器
+    cmd_copy = [ffmpeg, '-y', '-loglevel', 'error', '-i', video_path, '-vn', '-c:a', 'copy', '-f', 'mp4', audio_path]
+    try:
+        r = subprocess.run(cmd_copy, capture_output=True, text=True, timeout=120)
+        if r.returncode == 0 and _ok(audio_path):
+            return True, ''
+        copy_err = (r.stderr or r.stdout or 'copy 失败')[:300]
+    except Exception as e:
+        copy_err = str(e)[:300]
+
+    # 尝试 2：转码为 AAC（需要 ffmpeg 支持 AAC 编码器）
+    if _has_aac_encoder():
+        cmd_aac = [ffmpeg, '-y', '-loglevel', 'error', '-i', video_path, '-vn', '-c:a', 'aac', '-b:a', '192k', '-f', 'mp4', audio_path]
+        try:
+            r = subprocess.run(cmd_aac, capture_output=True, text=True, timeout=600)
+            if r.returncode == 0 and _ok(audio_path):
+                return True, ''
+            aac_err = (r.stderr or r.stdout or '转码失败')[:300]
+        except Exception as e:
+            aac_err = str(e)[:300]
+    else:
+        aac_err = '当前 ffmpeg 无 AAC 编码器，无法转码'
+
+    return False, f'{copy_err} | {aac_err}'
+
+
+def _get_duration(video_path):
+    """用 ffprobe 读取视频时长（秒）"""
+    ffprobe = _ffmpeg_bin('FFPROBE_PATH')
+    try:
+        r = subprocess.run(
+            [ffprobe, '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', video_path],
+            capture_output=True, text=True, timeout=60)
+        return float(r.stdout.strip())
+    except Exception:
+        return 0.0
+
+
+def music_library(request):
+    """音乐库列表页：支持按歌名搜索 + 分页"""
+    q = request.GET.get('q', '').strip()
+    qs = Music.objects.all()
+    if q:
+        qs = qs.filter(title__icontains=q)
+    paginator = Paginator(qs, 12)
+    page_obj = paginator.get_page(request.GET.get('page'))
+    return render(request, 'music_library.html', {
+        'songs': page_obj,
+        'page_obj': page_obj,
+        'q': q,
+        'total': paginator.count,
+    })
+
+
+def music_player(request):
+    """独立迷你播放器窗口：不继承主站布局，刷新主页面不影响播放"""
+    songs = list(Music.objects.filter(transcode_status='done').order_by('-created_at'))
+    data = [{
+        'id': s.id, 'title': s.title, 'duration': s.duration,
+        'audio_url': s.audio_file.url if s.audio_file else '',
+        'video_url': s.video_file.url if s.video_file else '',
+    } for s in songs]
+    raw_id = request.GET.get('id')
+    current_id = None
+    if raw_id and raw_id.isdigit():
+        current_id = int(raw_id)
+    return render(request, 'music_player.html', {'songs_json': json.dumps(data), 'current_id': current_id})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_music_upload(request):
+    """上传视频文件并提取音轨"""
+    try:
+        uploaded = request.FILES.get('file')
+        title = request.POST.get('title', '').strip()
+        if not uploaded:
+            return JsonResponse({'error': '请选择视频文件'}, status=400)
+        ext = os.path.splitext(uploaded.name)[1].lower()
+        if ext not in ('.mp4', '.mkv', '.webm', '.mov', '.flv', '.avi', '.m4v'):
+            return JsonResponse({'error': '不支持的视频格式：' + (ext or '无扩展名')}, status=400)
+        if uploaded.size > 500 * 1024 * 1024:
+            return JsonResponse({'error': '文件过大，请控制在 500MB 以内'}, status=400)
+
+        if not title:
+            title = os.path.splitext(uploaded.name)[0]
+
+        song = Music.objects.create(
+            title=title[:200],
+            video_file=uploaded,
+            filesize=uploaded.size,
+        )
+        # 同步转码：提取音轨
+        try:
+            video_path = song.video_file.path
+            song.duration = _get_duration(video_path)
+            audio_path = os.path.join(settings.MEDIA_ROOT, 'music', 'audio',
+                                      f'song_{song.id}.mp4')
+            os.makedirs(os.path.dirname(audio_path), exist_ok=True)
+            ok, diag = _extract_audio(video_path, audio_path)
+            if ok:
+                from django.core.files import File
+                with open(audio_path, 'rb') as f:
+                    song.audio_file.save(os.path.basename(audio_path), File(f), save=False)
+                song.transcode_status = 'done'
+            else:
+                song.transcode_status = 'failed'
+                song.transcode_error = diag
+                print(f'[Music] 音轨提取失败 id={song.id}: {diag}')
+        except Exception as e:
+            song.transcode_status = 'failed'
+            song.transcode_error = str(e)[:300]
+            print(f'[Music] 音轨提取失败 id={song.id}: {e}')
+        song.save()
+        return JsonResponse({
+            'success': True, 'id': song.id, 'title': song.title,
+            'status': song.transcode_status, 'duration': song.duration,
+        })
+    except Exception as e:
+        return JsonResponse({'error': f'上传失败：{str(e)}'}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_music_delete(request, song_id):
+    """删除音乐（同时删除视频与音频文件）"""
+    try:
+        song = get_object_or_404(Music, id=song_id)
+        for f in (song.audio_file, song.video_file):
+            if f:
+                try:
+                    f.delete(save=False)
+                except Exception:
+                    pass
+        song.delete()
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_music_update(request, song_id):
+    """编辑歌名"""
+    try:
+        song = get_object_or_404(Music, id=song_id)
+        title = request.POST.get('title', '').strip()
+        if not title:
+            return JsonResponse({'error': '歌名不能为空'}, status=400)
+        song.title = title[:200]
+        song.save()
+        return JsonResponse({'success': True, 'id': song.id, 'title': song.title})
+    except Exception as e:
+        return JsonResponse({'error': f'更新失败：{str(e)}'}, status=500)

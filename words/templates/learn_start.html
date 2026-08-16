@@ -83,6 +83,16 @@
       </label>
     </div>
     <div class="choice-group">
+      <span class="choice-group-title">每批数量</span>
+      {% for n in batch_options %}
+      <label class="choice-option">
+        <input type="radio" name="batch" value="{{ n }}" {% if n == batch_size %}checked{% endif %}>
+        <span>{{ n }} 个</span>
+      </label>
+      {% endfor %}
+      <p class="text-secondary text-sm" style="margin: 0;">每批背完后小结一次，点「继续下一批」再背</p>
+    </div>
+    <div class="choice-group">
       <span class="choice-group-title">检测方式</span>
       <label class="choice-option">
         <input type="radio" name="check" value="none" checked>
@@ -95,6 +105,10 @@
       <label class="choice-option">
         <input type="radio" name="check" value="meaning">
         <span>释义默写 <span class="text-secondary text-sm">（看英文写中文，AI 判定）</span></span>
+      </label>
+      <label class="choice-option">
+        <input type="radio" name="check" value="gates">
+        <span>高效背诵 <span class="text-secondary text-sm">（拼写+释义默写，写对才过）</span></span>
       </label>
     </div>
     </div>

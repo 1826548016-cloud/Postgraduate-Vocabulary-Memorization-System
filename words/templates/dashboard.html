@@ -95,7 +95,7 @@
   <div class="flex gap-4" style="flex-wrap: wrap;">
     <a href="{% url 'words:learn_start' %}" class="btn btn-primary"><i class="ph ph-target"></i> 开始背新词</a>
     <a href="{% url 'words:review_session' %}" class="btn btn-primary"><i class="ph ph-arrows-clockwise"></i> 复习已学单词(随机)</a>
-    <a href="{% url 'words:focus_mode' %}" class="btn btn-secondary"><i class="ph ph-eye"></i> 专注模式</a>
+    <a href="{% url 'words:history' %}" class="btn btn-secondary"><i class="ph ph-clock-counter-clockwise"></i> 背词记录</a>
   </div>
 </div>
 
@@ -242,8 +242,12 @@
   var weeklyChart = null;
 
   // 当前主题配色（跟随明暗模式）
+  function isDarkTheme() {
+    var t = document.documentElement.getAttribute('data-theme');
+    return t === 'dark' || t === 'nightblue';
+  }
   function chartPalette() {
-    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var dark = isDarkTheme();
     return {
       surface: dark ? '#2a251e' : '#fefcf7',
       border: dark ? '#423a2c' : '#e4ddcc',

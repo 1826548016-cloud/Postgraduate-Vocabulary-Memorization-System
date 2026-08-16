@@ -64,6 +64,16 @@
           已复习过的词不会重复出现，直至一轮复习完。
         </p>
       </div>
+      <div class="choice-group">
+        <span class="choice-group-title">每批数量</span>
+        {% for n in batch_options %}
+        <label class="choice-option">
+          <input type="radio" name="batch" value="{{ n }}" {% if n == batch_size %}checked{% endif %}>
+          <span>{{ n }} 个</span>
+        </label>
+        {% endfor %}
+        <p class="text-secondary text-sm" style="margin: 0;">每批复习完后小结一次，点「继续下一批」再复习</p>
+      </div>
     </div>
 
     <div class="unit-picker" style="margin-top: 14px;">

@@ -1,4 +1,4 @@
-// ===== 小助手共享组件（背诵/专注/复习共用，对话历史互通并持久化） =====
+// ===== 小助手共享组件（背诵/复习共用，对话历史互通并持久化） =====
 window.AssistantPanel = (function () {
   var cfg = { aiSettingsUrl: '/settings/#ai-models', getCurrentWord: null };
   var sending = false;

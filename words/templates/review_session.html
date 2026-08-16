@@ -105,6 +105,7 @@
   .btn-ghost-danger { background: transparent; color: var(--c-red); border: 1.5px solid var(--c-red); }
   .btn-ghost-danger:hover { background: var(--c-red-bg); }
   .kbd-hint { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 6px; font-size: var(--fs-xs); font-weight: 500; opacity: .8; background: var(--c-surface-2); color: var(--c-text-2); }
+  .gate-badge { display: inline-block; padding: 2px 10px; border-radius: 99px; background: var(--c-purple, #8a6f9e); color: #fff; font-size: var(--fs-xs); font-weight: 600; margin-right: 6px; vertical-align: 1px; }
   .mark-btn:disabled { opacity: .45; cursor: not-allowed; }
   .btn:active { transform: scale(.97); }
   @media (max-width: 640px) { .review-study-card { min-height: 490px; padding: 58px 20px 28px; } .review-tools { top: 12px; right: auto; } .review-study-card .word-text { margin-top: 20px; } }
@@ -148,6 +149,7 @@
     <button class="mode-btn is-active" data-check="none" id="reviewCheckNoneBtn">纯复习</button>
     <button class="mode-btn" data-check="spelling" id="reviewCheckSpellingBtn">拼写检测</button>
     <button class="mode-btn" data-check="meaning" id="reviewCheckMeaningBtn">释义默写</button>
+    <button class="mode-btn" data-check="gates" id="reviewCheckGatesBtn">高效背诵</button>
   </div>
   <div class="progress-bar">
     <div id="progressFill" class="progress-bar-fill review" style="width: 0%;"></div>
@@ -202,6 +204,21 @@
   {% include '_word_ext_panel.html' %}
 </div>
 
+<div id="batchCard" class="card word-card hidden">
+  <div class="card-header"><i class="ph ph-check-circle" style="color: var(--c-green);"></i> 第 <span id="batchNum">1</span> / <span id="batchTotal">1</span> 批完成</div>
+  <p class="text-secondary" id="batchMsg"></p>
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div id="batchMasteredCount" class="summary-value text-accent">0</div>
+      <div class="summary-label">本批会</div>
+    </div>
+    <div class="summary-card">
+      <div id="batchUnknownCount" class="summary-value">0</div>
+      <div class="summary-label">本批不会</div>
+    </div>
+  </div>
+  <button id="nextBatchBtn" class="btn btn-primary btn-lg"><i class="ph ph-arrow-right"></i> 继续下一批</button>
+</div>
 <div id="completionCard" class="card word-card hidden">
   <div class="card-header">🎉 复习完成</div>
   <p class="text-secondary">本次共复习 <strong>{{ review_count }}</strong> 个单词</p>
@@ -250,6 +267,8 @@
   if (savedDate !== batchDate) {
     sessionStorage.removeItem('vocab-review-idx');
     sessionStorage.removeItem('vocab-review-counts');
+    sessionStorage.removeItem('vocab-review-batch-start');
+    sessionStorage.removeItem('vocab-review-gate-done');
   }
   sessionStorage.setItem('vocab-review-date', batchDate);
 
@@ -262,8 +281,19 @@
   // 复习模式：all 全部词性 / uncommon 仅陌生词性（sessionStorage 持久化）
   var reviewMode = sessionStorage.getItem('vocab-review-mode') || 'all';
   var expandAllTmp = false; // 仅陌生模式下临时展开全部
-  var checkMode = 'none';   // 检测方式：none 纯复习 / spelling 拼写检测 / meaning 释义默写
+  var checkMode = 'none';   // 检测方式：none 纯复习 / spelling 拼写检测 / meaning 释义默写 / gates 高效背诵
   var checked = false;      // 检测模式下是否已提交判定
+  // 高效背诵：预看 → 拼写默写 → 释义默写（答错必须继续重写直到写对）
+  var gateStage = 0;        // 0=预看 1=拼写默写 2=释义默写
+  var gateAllCorrect = true; // 本词两关是否都一次通过
+  var gateWrongCount = 0;   // 当前关卡连续答错次数
+  var gateAutoTimer = null; // 释义答对后自动跳转下一词的定时器
+  var gateDone = {};        // 已完成（背诵通过）的单词索引集合，用于自由切换
+  var gateAutoShow = {{ gate_answer_show|yesno:'true,false' }}; // 答错后直接显示答案；否则先自己重试，连错 3 次才显示
+  try {
+    var savedGateDone = JSON.parse(sessionStorage.getItem('vocab-review-gate-done') || '{}');
+    if (savedGateDone) gateDone = savedGateDone;
+  } catch (e) {}
 
   var counts = { mastered: 0, unknown: 0 };
   // Restore counts so refresh keeps 会/不会统计
@@ -273,6 +303,15 @@
       counts.mastered = savedCounts.mastered || 0;
       counts.unknown = savedCounts.unknown || 0;
     }
+  } catch (e) {}
+
+  // 分批复习：每批 batchSize 个，复习完一批小结后点「继续下一批」
+  var batchSize = parseInt('{{ batch_size }}', 10) || 10;
+  var totalBatches = Math.max(1, Math.ceil(reviewCount / batchSize));
+  var batchStartCounts = { mastered: counts.mastered, unknown: counts.unknown };
+  try {
+    var savedBatchStart = JSON.parse(sessionStorage.getItem('vocab-review-batch-start') || 'null');
+    if (savedBatchStart) batchStartCounts = savedBatchStart;
   } catch (e) {}
 
   var els = {
@@ -298,6 +337,13 @@
     errorBadge: document.getElementById('errorBadge'),
     reviewCountBadge: document.getElementById('reviewCountBadge'),
     completionMsg: document.getElementById('completionMsg'),
+    batchCard: document.getElementById('batchCard'),
+    batchNum: document.getElementById('batchNum'),
+    batchTotal: document.getElementById('batchTotal'),
+    batchMsg: document.getElementById('batchMsg'),
+    batchMasteredCount: document.getElementById('batchMasteredCount'),
+    batchUnknownCount: document.getElementById('batchUnknownCount'),
+    nextBatchBtn: document.getElementById('nextBatchBtn'),
   };
 
   function updateProgress() {
@@ -321,6 +367,11 @@
     var byPos = (word && word.meanings_by_pos) || {};
     var posKeys = Object.keys(byPos).filter(function (k) { return byPos[k] && byPos[k].length; });
     if (posKeys.length) {
+      // 仅「未分类」时：若有词性字段则用词性作标签，避免出现「未分类」字样
+      if (posKeys.length === 1 && posKeys[0] === '未分类' && word.pos) {
+        return '<span class="meaning-pos">' + escapeHtml(word.pos) + '</span> ' +
+          byPos['未分类'].map(function (m) { return escapeHtml(m); }).join('；');
+      }
       return posKeys.map(function (p) {
         return '<span class="meaning-pos">' + escapeHtml(p) + '</span> ' +
           byPos[p].map(function (m) { return escapeHtml(m); }).join('；');
@@ -338,7 +389,10 @@
     revealDone = false;
     expandAllTmp = false;
     checked = false;
+    els.revealBtn.style.display = ''; // 恢复显示（高效模式会隐藏）
     setMarkButtonsEnabled(true);
+    var skipBtnEl = document.getElementById('skipBtn');
+    if (skipBtnEl) skipBtnEl.disabled = false;
     sessionStorage.setItem('vocab-review-idx', currentIndex);
 
     // 切换单词时收起笔记/速记展开区
@@ -375,6 +429,31 @@
       els.checkHint.textContent = '根据下方中文释义，默写英文单词：';
       els.checkInput.placeholder = '输入英文拼写';
       setTimeout(function () { els.checkInput.focus(); }, 60);
+    } else if (checkMode === 'gates') {
+      // 高效背诵：预看（单词+完整释义）→ 拼写默写 → 释义默写
+      gateStage = 0;
+      gateAllCorrect = true;
+      gateWrongCount = 0;
+      if (gateAutoTimer) { clearTimeout(gateAutoTimer); gateAutoTimer = null; }
+      els.wordText.textContent = word.word || '';
+      els.wordPhonetic.textContent = word.phonetic_us || '';
+      els.wordMeaning.innerHTML = buildMeaningsHtml(word);
+      els.wordMeaning.classList.remove('hidden');
+      els.revealBtn.style.display = 'none'; // 高效模式不提供答案，必须自己默写出来
+      els.revealBtn.disabled = true;
+      // 已背诵过的词（本词或下一词已完成）可自由切换；未背的新词须默写正确后才能前进
+      var gateNextBtn = document.getElementById('nextBtn');
+      if (gateNextBtn) gateNextBtn.disabled = !(gateDone[currentIndex] === true || gateDone[currentIndex + 1] === true);
+      setMarkButtonsEnabled(false); // 由系统自动判定，禁用「会/不会/永不忘记」
+      var skipBtnEl = document.getElementById('skipBtn');
+      if (skipBtnEl) skipBtnEl.disabled = true;
+      els.checkPanel.classList.remove('hidden');
+      els.checkInput.value = '';
+      els.checkInput.disabled = true;
+      els.checkSubmitBtn.disabled = false;
+      els.checkSubmitBtn.textContent = '开始默写';
+      els.checkHint.innerHTML = '<span class="gate-badge">第 1/3 步</span> 先看单词拼写和释义，熟悉后点「开始默写」';
+      els.checkInput.placeholder = '先看上面单词和释义';
     } else if (checkMode === 'meaning') {
       els.wordCard.classList.remove('is-spelling');
       els.wordText.textContent = word.word || '';
@@ -524,9 +603,10 @@
     counts[action] = (counts[action] || 0) + 1;
     sessionStorage.setItem('vocab-review-counts', JSON.stringify(counts));
 
-    VOCAB_API.post('/api/mark/' + action + '/' + currentWord.id + '/', {})
+    VOCAB_API.post('/api/mark/' + action + '/' + currentWord.id + '/', { source: 'review', mode: checkMode })
       .then(function (res) {
         if (res && res.auto_checked) showToast('今日已背诵 30 词，自动打卡成功！', 'success');
+        if (res && res.auto_excluded && typeof showToast === 'function') showToast('连续答对 10 次，已自动标记为「永不忘记」！', 'success');
         advance();
       })
       .catch(function (err) {
@@ -582,19 +662,28 @@
 
   function submitCheck() {
     if (!currentWord || checked) return;
+    // 高效模式预看阶段：点「开始默写」直接进入拼写关，无需输入
+    if (checkMode === 'gates' && gateStage === 0) {
+      startGateSpelling();
+      return;
+    }
     var answer = els.checkInput.value.trim();
     if (!answer) {
       if (typeof showToast === 'function') showToast('请先输入答案', 'error');
       return;
     }
     els.checkSubmitBtn.disabled = true;
-    var url = checkMode === 'spelling'
+    var url = (checkMode === 'spelling' || (checkMode === 'gates' && gateStage === 1))
       ? '/api/spelling-check/' + currentWord.id + '/'
       : '/api/meaning-check/' + currentWord.id + '/';
-    VOCAB_API.post(url, { answer: answer }).then(function (res) {
+    VOCAB_API.post(url, { answer: answer, source: 'review', mode: checkMode }).then(function (res) {
       if (!res || res.success === false || res.error) {
         els.checkSubmitBtn.disabled = false;
         if (typeof showToast === 'function') showToast((res && res.error) || '检测失败，请重试', 'error');
+        return;
+      }
+      if (checkMode === 'gates') {
+        submitGateResult(res, answer);
         return;
       }
       checked = true;
@@ -605,20 +694,162 @@
       setMarkButtonsEnabled(false);
       els.checkSubmitBtn.textContent = '下一词';
       if (res.auto_checked && typeof showToast === 'function') showToast('今日已背诵 30 词，自动打卡成功！', 'success');
+      if (res.auto_excluded && typeof showToast === 'function') showToast('连续答对 10 次，已自动标记为「永不忘记」！', 'success');
     }).catch(function () {
       els.checkSubmitBtn.disabled = false;
       if (typeof showToast === 'function') showToast('检测失败，请重试', 'error');
     });
   }
 
+  // 高效背诵：三步串联（预看 → 拼写 → 释义），答错必须继续重写直到默写正确
+  function startGateSpelling() {
+    gateStage = 1;
+    els.wordText.textContent = '';          // 隐藏英文，只留中文释义作为默写依据
+    els.wordPhonetic.textContent = '';
+    els.checkInput.value = '';
+    els.checkInput.disabled = false;
+    els.checkSubmitBtn.disabled = false;
+    els.checkSubmitBtn.textContent = '检查';
+    els.checkHint.innerHTML = '<span class="gate-badge">第 2/3 步</span> 拼写默写：根据中文释义默写英文单词';
+    els.checkInput.placeholder = '输入英文拼写';
+    setTimeout(function () { els.checkInput.focus(); }, 60);
+  }
+
+  // 进入释义默写（拼写默写正确后）
+  function enterMeaningGate() {
+    gateStage = 2;
+    gateWrongCount = 0;
+    els.wordText.textContent = currentWord.word || '';
+    els.wordPhonetic.textContent = currentWord.phonetic_us || '';
+    els.wordMeaning.classList.add('hidden');
+    els.checkInput.value = '';
+    els.checkInput.disabled = false;
+    els.checkSubmitBtn.disabled = false;
+    els.checkSubmitBtn.textContent = '检查';
+    els.checkResult.className = 'check-result result-correct';
+    els.checkResult.innerHTML = '<div class="check-result-title">拼写正确 ✓ 进入释义默写</div>';
+    els.checkHint.innerHTML = '<span class="gate-badge">第 3/3 步</span> 释义默写：根据英文单词写出中文意思';
+    els.checkInput.placeholder = '输入中文释义';
+    setTimeout(function () { els.checkInput.focus(); }, 60);
+  }
+
+  // 释义默写通过：记统计并自动跳转下一词
+  function gatePass(res) {
+    checked = true;
+    counts[gateAllCorrect ? 'mastered' : 'unknown'] = (counts[gateAllCorrect ? 'mastered' : 'unknown'] || 0) + 1;
+    sessionStorage.setItem('vocab-review-counts', JSON.stringify(counts));
+    if (res && gateAllCorrect) {
+      renderCheckResult(res);
+    } else if (res) {
+      // 中途有答错、最终默写正确：展示正确但记「不会」
+      els.checkResult.className = 'check-result';
+      els.checkResult.innerHTML = '<div class="check-result-title">释义默写正确（中途有答错，本词记入「不会」）</div>';
+    }
+    if (res && res.auto_checked && typeof showToast === 'function') showToast('今日已背诵 30 词，自动打卡成功！', 'success');
+    if (res && res.auto_excluded && typeof showToast === 'function') showToast('连续答对 10 次，已自动标记为「永不忘记」！', 'success');
+    setMarkButtonsEnabled(false);
+    els.checkSubmitBtn.textContent = '下一词';
+    // 标记本词已完成（已背诵），此后可自由上/下切换
+    gateDone[currentIndex] = true;
+    sessionStorage.setItem('vocab-review-gate-done', JSON.stringify(gateDone));
+    // 答对后：放开「下一词」按钮，并自动跳转到下一个单词
+    var gateNextBtn = document.getElementById('nextBtn');
+    if (gateNextBtn) gateNextBtn.disabled = false;
+    if (gateAutoTimer) clearTimeout(gateAutoTimer);
+    gateAutoTimer = setTimeout(function () { gateAutoTimer = null; advance(); }, 700);
+  }
+
+  function submitGateResult(res, answer) {
+    if (gateStage === 1) {
+      // 第 2 步：拼写默写
+      if (res.correct) {
+        enterMeaningGate();
+        if (res.auto_checked && typeof showToast === 'function') showToast('今日已背诵 30 词，自动打卡成功！', 'success');
+        if (res.auto_excluded && typeof showToast === 'function') showToast('连续答对 10 次，已自动标记为「永不忘记」！', 'success');
+        return;
+      }
+      // 拼写错误：必须继续重写拼写，直到正确才进入释义默写
+      gateAllCorrect = false;
+      gateWrongCount += 1;
+      if (gateAutoShow || gateWrongCount >= 3) {
+        els.checkResult.className = 'check-result result-wrong';
+        els.checkResult.innerHTML =
+          '<div class="check-result-title">拼写错误</div>' +
+          highlightDiff(answer, currentWord.word) +
+          '<div class="spell-line">正确答案：<strong>' + escapeHtml(currentWord.word) + '</strong></div>';
+        prepareGateRetry('根据正确答案，重新默写英文单词：');
+      } else {
+        els.checkResult.className = 'check-result result-wrong';
+        els.checkResult.innerHTML = '<div class="check-result-title">拼写错误，请再试一次</div>';
+        prepareGateRetry('再默写一次英文单词（连错 3 次将显示答案）：');
+      }
+      return;
+    }
+    // 第 3 步：释义默写
+    if (res.verdict === 'correct' || res.verdict === 'partial') {
+      gatePass(res);
+      return;
+    }
+    // 释义错误：必须继续重写释义，直到正确才进入下一词
+    gateAllCorrect = false;
+    gateWrongCount += 1;
+    var showMeaningAnswer = gateAutoShow || gateWrongCount >= 3;
+    els.checkResult.className = 'check-result result-wrong';
+    els.checkResult.innerHTML =
+      '<div class="check-result-title">释义不正确</div>' +
+      (showMeaningAnswer ? '<div class="spell-line">正确答案：</div>' + buildMeaningsHtml(currentWord) : '') +
+      (res.comment ? '<div class="check-comment">' + escapeHtml(res.comment) + '</div>' : '') +
+      (res.used_ai === false ? '<div><span class="check-flag">本地判定</span></div>' : '');
+    prepareGateRetry(showMeaningAnswer ? '根据正确答案，重新默写中文意思：' : '再默写一次中文意思（连错 3 次将显示答案）：');
+  }
+
+  // 高效模式答错后：清空输入重新默写
+  function prepareGateRetry(hint) {
+    els.checkInput.value = '';
+    els.checkInput.disabled = false;
+    els.checkSubmitBtn.disabled = false;
+    els.checkSubmitBtn.textContent = '再试一次';
+    els.checkHint.innerHTML = '<span class="gate-badge">第 ' + (gateStage + 1) + '/3 步</span> ' + hint;
+    setTimeout(function () { els.checkInput.focus(); }, 60);
+  }
+
   function advance() {
+    if (gateAutoTimer) { clearTimeout(gateAutoTimer); gateAutoTimer = null; } // 手动切换时取消自动跳转
     if (currentIndex >= reviewCount - 1) {
       showCompletion();
+      return;
+    }
+    var nextIndex = currentIndex + 1;
+    // 到达批边界：先展示本批小结，等用户点「继续下一批」
+    if (Math.floor(nextIndex / batchSize) > Math.floor(currentIndex / batchSize)) {
+      showBatchCompletion();
       return;
     }
     currentIndex += 1;
     renderWord(wordsData[currentIndex]);
   }
+
+  function showBatchCompletion() {
+    var batchIdx = Math.floor(currentIndex / batchSize) + 1; // 刚完成的批（从 1 开始）
+    var wordsInBatch = Math.min(batchSize, reviewCount - (batchIdx - 1) * batchSize);
+    els.wordCard.classList.add('hidden');
+    els.batchCard.classList.remove('hidden');
+    els.batchNum.textContent = batchIdx;
+    els.batchTotal.textContent = totalBatches;
+    els.batchMasteredCount.textContent = (counts.mastered || 0) - (batchStartCounts.mastered || 0);
+    els.batchUnknownCount.textContent = (counts.unknown || 0) - (batchStartCounts.unknown || 0);
+    els.batchMsg.textContent = '本批 ' + wordsInBatch + ' 个单词已复习完，可稍作休息再继续。';
+  }
+
+  // 继续下一批
+  if (els.nextBatchBtn) els.nextBatchBtn.addEventListener('click', function () {
+    batchStartCounts = { mastered: counts.mastered || 0, unknown: counts.unknown || 0 };
+    sessionStorage.setItem('vocab-review-batch-start', JSON.stringify(batchStartCounts));
+    els.batchCard.classList.add('hidden');
+    els.wordCard.classList.remove('hidden');
+    currentIndex += 1;
+    renderWord(wordsData[currentIndex]);
+  });
 
   function goPrev() {
     if (currentIndex <= 0) return;
@@ -638,6 +869,8 @@
     els.unknownCount.textContent = counts.unknown;
     sessionStorage.removeItem('vocab-review-idx');
     sessionStorage.removeItem('vocab-review-counts');
+    sessionStorage.removeItem('vocab-review-batch-start');
+    sessionStorage.removeItem('vocab-review-gate-done');
 
     var msg = '';
     if (counts.mastered >= reviewCount * 0.8) {
@@ -679,9 +912,11 @@
   var checkNoneBtn = document.getElementById('reviewCheckNoneBtn');
   var checkSpellingBtn = document.getElementById('reviewCheckSpellingBtn');
   var checkMeaningBtn = document.getElementById('reviewCheckMeaningBtn');
+  var checkGatesBtn = document.getElementById('reviewCheckGatesBtn');
   if (checkNoneBtn) checkNoneBtn.addEventListener('click', function () { setCheckMode('none'); });
   if (checkSpellingBtn) checkSpellingBtn.addEventListener('click', function () { setCheckMode('spelling'); });
   if (checkMeaningBtn) checkMeaningBtn.addEventListener('click', function () { setCheckMode('meaning'); });
+  if (checkGatesBtn) checkGatesBtn.addEventListener('click', function () { setCheckMode('gates'); });
 
   // 复习模式切换
   function setReviewMode(mode) {
@@ -731,7 +966,7 @@
     if (!currentWord || checked) return;
     var w = currentWord;
     if (!confirm('标记「' + w.word + '」为永不忘记？之后它将不再出现在背诵/复习中。')) return;
-    VOCAB_API.post('/api/mark/skip/' + w.id + '/', {})
+    VOCAB_API.post('/api/mark/skip/' + w.id + '/', { source: 'review', mode: checkMode })
       .then(function (res) {
         if (res && res.success) {
           if (typeof showToast === 'function') showToast('已标记「' + w.word + '」为永不忘记', 'success');
@@ -776,6 +1011,13 @@
       return;
     }
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (els.wordCard.classList.contains('hidden')) return; // 展示小结/完成卡片时忽略操作键
+    // 高效模式：屏蔽空格/会/不会快捷键；上一词自由切换，下一词仅在已背诵的词之间可用
+    if (checkMode === 'gates') {
+      if (e.code === 'ArrowLeft') { e.preventDefault(); goPrev(); }
+      else if (e.code === 'ArrowRight') { e.preventDefault(); if (gateDone[currentIndex] === true || gateDone[currentIndex + 1] === true) goNext(); }
+      return;
+    }
     switch (e.code) {
       case 'Space': e.preventDefault(); reveal(); break;
       case 'Digit1': case 'Numpad1': e.preventDefault(); mark('mastered'); break;

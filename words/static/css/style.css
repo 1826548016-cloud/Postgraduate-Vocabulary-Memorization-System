@@ -115,6 +115,126 @@
   --shadow-lg: 0 10px 28px rgba(0,0,0,.45);
 }
 
+[data-theme="blue"] {
+  /* Breeze — 清爽蓝白（明亮干净） */
+  --c-bg: #f0f4fa;
+  --c-surface: #ffffff;
+  --c-surface-2: #e8eef7;
+  --c-sidebar: #26364f;
+  --c-text: #22293a;
+  --c-text-2: #5d6a84;
+  --c-text-3: #93a0b8;
+  --c-border: #d9e2ef;
+  --c-border-light: #e5ecf5;
+
+  --c-green: #2f8f6b;
+  --c-green-h: #27795c;
+  --c-green-bg: #dff1ea;
+  --c-green-bg-h: #d2ebdf;
+  --c-red: #d05a5a;
+  --c-red-h: #b94a4a;
+  --c-red-deep: #9e3c3c;
+  --c-red-bg: #fbe8e8;
+  --c-blue: #3a6ea5;
+  --c-blue-bg: #e2ecf6;
+  --c-purple: #7d6fb0;
+  --c-purple-bg: #ece9f6;
+  --c-amber: #c08a1e;
+  --c-amber-bg: #f8efd8;
+  --accent: #3a6ea5;
+  --c-accent: var(--c-blue);
+
+  --heat-empty: #e7ecf3;
+  --heat-l1: #f3d8d8;
+  --heat-l2: #e3a9a9;
+  --heat-l3: #cf7777;
+  --heat-l4: #d05a5a;
+
+  --shadow: 0 1px 2px rgba(35,55,90,.05), 0 2px 8px rgba(35,55,90,.06);
+  --shadow-md: 0 4px 14px rgba(35,55,90,.09);
+  --shadow-lg: 0 10px 28px rgba(35,55,90,.16);
+}
+
+[data-theme="sepia"] {
+  /* Scroll — 复古牛皮纸（做旧暖棕） */
+  --c-bg: #f0e2c8;
+  --c-surface: #f9efd9;
+  --c-surface-2: #e8d8b8;
+  --c-sidebar: #4a3b28;
+  --c-text: #3f3325;
+  --c-text-2: #7c6a4f;
+  --c-text-3: #a6957a;
+  --c-border: #dcc9a4;
+  --c-border-light: #e7d7b6;
+
+  --c-green: #5c7440;
+  --c-green-h: #4e6436;
+  --c-green-bg: #e7edda;
+  --c-green-bg-h: #dce6c8;
+  --c-red: #a5523c;
+  --c-red-h: #91462f;
+  --c-red-deep: #7d3b28;
+  --c-red-bg: #f2e0d8;
+  --c-blue: #546f8c;
+  --c-blue-bg: #e4ebf0;
+  --c-purple: #7c6a86;
+  --c-purple-bg: #ece7ee;
+  --c-amber: #a0711b;
+  --c-amber-bg: #f2e7c8;
+  --accent: #a5523c;
+  --c-accent: var(--c-red);
+
+  --heat-empty: #e4d5b6;
+  --heat-l1: #ecccb8;
+  --heat-l2: #d99c7e;
+  --heat-l3: #c0704f;
+  --heat-l4: #a5523c;
+
+  --shadow: 0 1px 2px rgba(80,60,30,.06), 0 2px 8px rgba(80,60,30,.07);
+  --shadow-md: 0 4px 14px rgba(80,60,30,.1);
+  --shadow-lg: 0 10px 28px rgba(80,60,30,.18);
+}
+
+[data-theme="nightblue"] {
+  /* Stardust — 星空午夜蓝（深蓝黑，夜晚专注） */
+  --c-bg: #151a26;
+  --c-surface: #1d2434;
+  --c-surface-2: #262e42;
+  --c-sidebar: #10141d;
+  --c-text: #dce4f0;
+  --c-text-2: #97a3bb;
+  --c-text-3: #66718c;
+  --c-border: #323c54;
+  --c-border-light: #2a3348;
+
+  --c-green: #8fd0a9;
+  --c-green-h: #a3dbb9;
+  --c-green-bg: #20302a;
+  --c-green-bg-h: #26392f;
+  --c-red: #e8817e;
+  --c-red-h: #f09390;
+  --c-red-deep: #d06460;
+  --c-red-bg: #38282c;
+  --c-blue: #7ea8e0;
+  --c-blue-bg: #232e42;
+  --c-purple: #a59ad4;
+  --c-purple-bg: #2e2a3e;
+  --c-amber: #dfb055;
+  --c-amber-bg: #3a3118;
+  --accent: #e8817e;
+  --c-accent: var(--c-red);
+
+  --heat-empty: #222a3a;
+  --heat-l1: #432e32;
+  --heat-l2: #6a4346;
+  --heat-l3: #a55f5c;
+  --heat-l4: #e8817e;
+
+  --shadow: 0 1px 2px rgba(0,0,0,.28), 0 2px 8px rgba(0,0,0,.24);
+  --shadow-md: 0 4px 14px rgba(0,0,0,.4);
+  --shadow-lg: 0 10px 28px rgba(0,0,0,.5);
+}
+
 /* ===== Phosphor icons base ===== */
 i.ph { font-size: 1.2em; vertical-align: middle; line-height: 0; }
 i.ph.ph-sm { font-size: 1em; }
@@ -209,6 +329,19 @@ h1, h2, h3, h4,
   .top-bar { background: var(--c-surface); }
 }
 .top-bar-title { font-size: var(--fs-lg); font-weight: 600; }
+.top-bar-slogan {
+  flex: 1;
+  text-align: center;
+  font-family: var(--font-serif);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--c-text);
+  letter-spacing: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 12px;
+}
 .top-bar-actions { display: flex; align-items: center; gap: 8px; }
 
 /* Page Content */
@@ -703,6 +836,7 @@ textarea.form-input { resize: vertical; min-height: 80px; }
   .main-content { margin-left: 0; padding-bottom: 58px; }
   .page-content { padding: 16px; }
   .top-bar { padding: 8px 16px; }
+  .top-bar-slogan { display: none; }
   .top-bar-title { font-size: var(--fs-base); }
   .card { padding: 16px 18px; }
   .card-flash, .word-card { padding: 28px 20px; }

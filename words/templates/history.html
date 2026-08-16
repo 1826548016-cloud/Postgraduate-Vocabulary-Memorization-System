@@ -1,0 +1,167 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}背词记录 - 考研单词背诵系统{% endblock %}
+{% block page_title %}背词记录{% endblock %}
+
+{% block extra_head %}
+<style>
+  .history-wrap { max-width: 900px; margin: 0 auto; }
+  .stat-value-sm { font-size: var(--font-2xl); font-weight: 700; }
+  .filter-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .filter-bar select, .filter-bar .btn { margin: 0; }
+  .trend-chart { display: flex; align-items: flex-end; gap: 3px; height: 130px; padding: 10px 4px 0; }
+  .trend-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; min-width: 0; }
+  .trend-bar-wrap { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+  .trend-bar { width: 60%; border-radius: 3px 3px 0 0; background: var(--c-purple, #8a6f9e); opacity: .85; min-height: 2px; transition: opacity .15s; }
+  .trend-bar:hover { opacity: 1; }
+  .trend-bar.zero { background: var(--c-border); opacity: .5; }
+  .trend-num { font-size: var(--fs-xs); color: var(--c-text-2); }
+  .trend-label { font-size: var(--fs-xs); color: var(--c-text-3); }
+  .day-group { margin-bottom: 14px; }
+  .day-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: var(--c-surface-2); border-radius: var(--radius-sm); margin-bottom: 8px; flex-wrap: wrap; gap: 6px; }
+  .record-row { display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-bottom: 1px solid var(--c-border); flex-wrap: wrap; }
+  .record-row:last-child { border-bottom: none; }
+  .record-time { font-size: var(--fs-xs); color: var(--c-text-3); min-width: 46px; }
+  .record-word { font-weight: 600; min-width: 110px; }
+  .record-word a { color: var(--c-text); text-decoration: none; }
+  .record-word a:hover { color: var(--c-purple, #8a6f9e); }
+  .record-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .tag { font-size: var(--fs-xs); padding: 2px 9px; border-radius: 99px; }
+  .tag-ok { background: var(--c-green-bg); color: var(--c-green); }
+  .tag-bad { background: var(--c-red-bg); color: var(--c-red); }
+  .tag-skip { background: var(--c-surface-2); color: var(--c-text-2); }
+  .tag-neutral { background: var(--c-amber-bg); color: var(--c-amber); }
+  .pagination { display: flex; justify-content: center; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+  .pagination .page-link { padding: 6px 12px; border: 1px solid var(--c-border); border-radius: var(--radius-sm); color: var(--c-text-2); text-decoration: none; }
+  .pagination .page-link.active { background: var(--c-purple, #8a6f9e); color: #fff; border-color: var(--c-purple, #8a6f9e); }
+</style>
+{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<div class="history-wrap">
+
+  <!-- 统计卡片 -->
+  <div class="card-grid" style="margin-bottom: 20px;">
+    <div class="card stat-card">
+      <div class="card-header">今日背词</div>
+      <div class="stat-value">{{ today_total }}</div>
+      <div class="stat-label">次操作（筛选范围内）</div>
+    </div>
+    <div class="card stat-card">
+      <div class="card-header">累计背词</div>
+      <div class="stat-value">{{ total }}</div>
+      <div class="stat-label">次操作（筛选范围内）</div>
+    </div>
+    <div class="card stat-card">
+      <div class="card-header">今日正确率</div>
+      <div class="stat-value text-accent">{{ today_rate }}%</div>
+      <div class="stat-label">会 + 检测正确</div>
+    </div>
+    <div class="card stat-card">
+      <div class="card-header">整体正确率</div>
+      <div class="stat-value">{{ correct_rate }}%</div>
+      <div class="stat-label">会 + 检测正确</div>
+    </div>
+    <div class="card stat-card">
+      <div class="card-header">连续打卡</div>
+      <div class="stat-value">{{ streak }}<span style="font-size: 1rem;"> 天</span></div>
+      <div class="stat-label">当前连续打卡</div>
+    </div>
+  </div>
+
+  <!-- 筛选栏 -->
+  <div class="card" style="margin-bottom: 20px;">
+    <form method="get" class="filter-bar">
+      <select name="source" class="form-input" style="width: auto;">
+        <option value="all" {% if source == 'all' %}selected{% endif %}>全部来源</option>
+        <option value="learn" {% if source == 'learn' %}selected{% endif %}>背诵</option>
+        <option value="review" {% if source == 'review' %}selected{% endif %}>复习</option>
+        <option value="favorite" {% if source == 'favorite' %}selected{% endif %}>收藏复习</option>
+      </select>
+      <select name="action" class="form-input" style="width: auto;">
+        <option value="all" {% if action == 'all' %}selected{% endif %}>全部动作</option>
+        {% for value, label in action_choices %}
+        <option value="{{ value }}" {% if action == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <select name="days" class="form-input" style="width: auto;">
+        <option value="7" {% if days == '7' %}selected{% endif %}>近 7 天趋势</option>
+        <option value="30" {% if days == '30' %}selected{% endif %}>近 30 天趋势</option>
+        <option value="90" {% if days == '90' %}selected{% endif %}>近 90 天趋势</option>
+      </select>
+      <button type="submit" class="btn btn-primary"><i class="ph ph-funnel"></i> 筛选</button>
+      <a href="{% url 'words:history' %}" class="btn btn-secondary">重置</a>
+    </form>
+  </div>
+
+  <!-- 近 N 天趋势 -->
+  <div class="card" style="margin-bottom: 20px;">
+    <div class="card-header" style="margin-bottom: 10px;"><i class="ph ph-chart-bar"></i> 近 {{ days }} 天背词趋势（柱高 = 当日操作次数）</div>
+    {% if trend %}
+    <div class="trend-chart">
+      {% for d in trend %}
+      <div class="trend-col" title="{{ d.label }}：{{ d.total }} 次，正确率 {{ d.rate }}%">
+        <div class="trend-num">{% if d.total %}{{ d.total }}{% endif %}</div>
+        <div class="trend-bar-wrap">
+          <div class="trend-bar{% if not d.total %} zero{% endif %}" style="height: {% widthratio d.total trend_max 100 %}%"></div>
+        </div>
+        <div class="trend-label">{{ d.label }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-secondary">暂无趋势数据。</p>
+    {% endif %}
+  </div>
+
+  <!-- 时间线 -->
+  {% if groups %}
+    {% for day, records in groups %}
+    <div class="day-group">
+      <div class="day-header">
+        <strong>{{ day|date:'m月d日' }} <span class="text-secondary text-sm">({{ day|date:'D' }})</span></strong>
+        <span class="text-secondary text-sm">共 {{ records|length }} 条</span>
+      </div>
+      <div class="card" style="padding: 4px 0;">
+        {% for rec in records %}
+        <div class="record-row">
+          <span class="record-time">{{ rec.created_at|time:'H:i' }}</span>
+          <span class="record-word"><a href="{% url 'words:word_detail' rec.word_id %}">{{ rec.word.word }}</a></span>
+          <span class="text-secondary text-sm">{{ rec.word.pos }}</span>
+          <span class="record-tags">
+            {% if rec.source == 'learn' %}<span class="tag tag-neutral">背诵</span>
+            {% elif rec.source == 'review' %}<span class="tag tag-neutral">复习</span>
+            {% else %}<span class="tag tag-neutral">收藏复习</span>{% endif %}
+            {% if rec.action == 'known' or rec.action == 'meaning_ok' or rec.action == 'spelling_ok' %}<span class="tag tag-ok">{{ rec.get_action_display }}</span>
+            {% elif rec.action == 'skip' %}<span class="tag tag-skip">{{ rec.get_action_display }}</span>
+            {% else %}<span class="tag tag-bad">{{ rec.get_action_display }}</span>{% endif %}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+
+    <!-- 分页 -->
+    <div class="pagination">
+      {% if page_obj.has_previous %}
+      <a class="page-link" href="?page={{ page_obj.previous_page_number }}&source={{ source }}&action={{ action }}&days={{ days }}">上一页</a>
+      {% endif %}
+      <span class="page-link active">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+      {% if page_obj.has_next %}
+      <a class="page-link" href="?page={{ page_obj.next_page_number }}&source={{ source }}&action={{ action }}&days={{ days }}">下一页</a>
+      {% endif %}
+    </div>
+  {% else %}
+  <div class="card text-center" style="padding: 48px 24px;">
+    <div style="font-size: 3rem; margin-bottom: 16px;">🗒️</div>
+    <div style="font-size: var(--font-xl); font-weight: 600; margin-bottom: 8px;">还没有背词记录</div>
+    <p class="text-secondary">去背诵或复习一些单词吧，每次 会/不会、拼写/释义检测都会被记录在这里。</p>
+    <a href="{% url 'words:learn_start' %}" class="btn btn-primary" style="margin-top: 8px;"><i class="ph ph-play"></i> 开始背诵</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

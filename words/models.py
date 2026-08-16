@@ -139,9 +139,14 @@ class StudyProgress(models.Model):
     spelling_correct = models.IntegerField(default=0, verbose_name='拼写正确次数')
     meaning_attempts = models.IntegerField(default=0, verbose_name='释义默写次数')
     meaning_correct = models.IntegerField(default=0, verbose_name='释义默写正确次数')
+    consecutive_correct = models.IntegerField(default=0, verbose_name='连续答对次数',
+        help_text='背诵/复习中连续答对计数，达到阈值自动标记为永不忘记')
     is_excluded = models.BooleanField(default=False, db_index=True,
         verbose_name='永不忘记（永久排除）',
         help_text='标记为永不忘记的词不再出现在背诵/复习中')
+    manual_level = models.IntegerField(
+        choices=[(1, '熟练'), (2, '次于熟练'), (3, '生词')], default=3, db_index=True,
+        verbose_name='手动等级', help_text='1=熟练 2=次于熟练 3=生词；与自动「会/不会」双轨并存，由用户手动划分')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
     class Meta:
@@ -293,6 +298,42 @@ class StudySession(models.Model):
         return round(self.correct_count / self.words_count * 100, 1)
 
 
+class StudyRecord(models.Model):
+    """背词历史明细：每次 会/不会、拼写/释义检测、跳过 等操作各记一条"""
+    ACTION_CHOICES = [
+        ('known', '会'),
+        ('unknown', '不会'),
+        ('spelling_ok', '拼写正确'),
+        ('spelling_wrong', '拼写错误'),
+        ('meaning_ok', '释义正确'),
+        ('meaning_wrong', '释义错误'),
+        ('skip', '永不忘记'),
+    ]
+    SOURCE_CHOICES = [
+        ('learn', '背诵'),
+        ('review', '复习'),
+        ('favorite', '收藏复习'),
+    ]
+
+    word = models.ForeignKey(Word, on_delete=models.CASCADE,
+        related_name='study_records', verbose_name='单词')
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES,
+        verbose_name='动作', db_index=True)
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES,
+        default='learn', verbose_name='来源', db_index=True)
+    mode = models.CharField(max_length=30, blank=True, default='',
+        verbose_name='模式')  # sequential/random/gates/spelling/meaning 等
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='时间', db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = '背词记录'
+        verbose_name_plural = '背词记录'
+
+    def __str__(self):
+        return '%s %s' % (self.word_id, self.get_action_display())
+
+
 class UserSettings(models.Model):
     FONT_CHOICES = [
         ('small', '小'),
@@ -303,10 +344,19 @@ class UserSettings(models.Model):
         ('us', '美音'),
         ('uk', '英音'),
     ]
+    THEME_CHOICES = [
+        ('light', '暖纸浅色'),
+        ('blue', '清爽蓝白'),
+        ('sepia', '复古牛皮'),
+        ('dark', '深夜书桌'),
+        ('nightblue', '星空午夜'),
+    ]
 
     font_size = models.CharField(max_length=10, choices=FONT_CHOICES,
         default='medium', verbose_name='字体大小')
     dark_mode = models.BooleanField(default=False, verbose_name='深色模式')
+    theme = models.CharField(max_length=15, choices=THEME_CHOICES,
+        default='light', verbose_name='主题')
     pronunciation_on = models.BooleanField(default=True, verbose_name='发音开关')
     auto_read = models.BooleanField(default=True, verbose_name='自动朗读')
     speech_rate = models.FloatField(default=1.0, verbose_name='语速')
@@ -314,6 +364,8 @@ class UserSettings(models.Model):
         default='us', verbose_name='发音类型')
     daily_new_target = models.IntegerField(default=30, verbose_name='每日新词目标')
     daily_review_target = models.IntegerField(default=50, verbose_name='每日复习目标')
+    batch_size = models.IntegerField(default=10, verbose_name='每批背诵数量')
+    gate_answer_show = models.BooleanField(default=True, verbose_name='高效模式答错后显示答案')
     use_ai_meaning_check = models.BooleanField(default=True, verbose_name='释义默写使用 AI 判定')
     assistant_model = models.ForeignKey('AIModel', null=True, blank=True,
         on_delete=models.SET_NULL, related_name='+', verbose_name='小助手模型')
@@ -357,7 +409,7 @@ class Conversation(models.Model):
 
 
 class ChatMessage(models.Model):
-    """小助手对话记录：背诵/专注/复习三个模式共用同一条对话，历史持久化保存"""
+    """小助手对话记录：背诵/复习两个模式共用同一条对话，历史持久化保存"""
     ROLE_CHOICES = [
         ('user', '用户'),
         ('assistant', '小助手'),
@@ -457,3 +509,62 @@ class LearningReport(models.Model):
             return json.loads(self.summary_json)
         except (json.JSONDecodeError, TypeError):
             return {}
+
+
+class PdfDocument(models.Model):
+    """PDF 资料库：上传的 PDF 文件，供在线阅读"""
+    title = models.CharField(max_length=200, verbose_name='标题')
+    file = models.FileField(upload_to='pdfs/', verbose_name='PDF 文件')
+    filesize = models.BigIntegerField(default=0, verbose_name='文件大小(字节)')
+    file_hash = models.CharField(max_length=32, blank=True, default='', db_index=True,
+        verbose_name='文件MD5', help_text='用于去重，相同内容判定为重复')
+    uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name='上传时间')
+
+    class Meta:
+        ordering = ['-uploaded_at']
+        verbose_name = 'PDF 资料'
+        verbose_name_plural = 'PDF 资料'
+
+    def __str__(self):
+        return self.title
+
+    def filesize_display(self):
+        """人类可读的文件大小"""
+        size = self.filesize
+        if size < 1024:
+            return f'{size} B'
+        elif size < 1024 * 1024:
+            return f'{round(size / 1024, 1)} KB'
+        else:
+            return f'{round(size / (1024 * 1024), 1)} MB'
+
+
+class Music(models.Model):
+    """音乐播放器：上传视频文件，ffmpeg 提取音轨生成纯音频播放"""
+    TRANSCODE_CHOICES = [
+        ('pending', '转码中'),
+        ('done', '已完成'),
+        ('failed', '失败'),
+    ]
+    title = models.CharField(max_length=200, verbose_name='标题')
+    video_file = models.FileField(upload_to='music/videos/', verbose_name='视频文件')
+    audio_file = models.FileField(upload_to='music/audio/', null=True, blank=True, verbose_name='音频文件')
+    duration = models.FloatField(default=0, verbose_name='时长(秒)')
+    filesize = models.BigIntegerField(default=0, verbose_name='视频大小(字节)')
+    transcode_status = models.CharField(max_length=10, choices=TRANSCODE_CHOICES,
+        default='pending', verbose_name='转码状态')
+    transcode_error = models.TextField(blank=True, default='', verbose_name='转码错误信息')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='添加时间')
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = '音乐'
+        verbose_name_plural = '音乐'
+
+    def __str__(self):
+        return self.title
+
+    def duration_display(self):
+        m = int(self.duration) // 60
+        s = int(self.duration) % 60
+        return f'{m}:{s:02d}'

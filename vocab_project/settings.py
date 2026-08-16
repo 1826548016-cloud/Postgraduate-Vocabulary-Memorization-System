@@ -75,6 +75,10 @@ STATICFILES_DIRS = [
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# ffmpeg 路径：用于从视频提取音轨（音乐播放器）
+FFMPEG_PATH = 'd:\\trae\\Trae CN\\resources\\app\\bin\\ffmpeg.exe'
+FFPROBE_PATH = 'd:\\trae\\Trae CN\\resources\\app\\bin\\ffprobe.exe'
+
 BACKUP_DIR = BASE_DIR / 'backups'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

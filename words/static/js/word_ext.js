@@ -1,4 +1,4 @@
-// word_ext.js — 笔记 / AI 速记 共享组件（背诵、专注、复习模式通用）
+// word_ext.js — 笔记 / AI 速记 共享组件（背诵、复习模式通用）
 // 依赖：VOCAB_API、showToast（app.js 提供）
 (function () {
   'use strict';

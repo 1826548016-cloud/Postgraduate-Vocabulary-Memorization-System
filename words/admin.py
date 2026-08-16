@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (Unit, Word, StudyProgress, StudyPlan,
-                     DailyCheckIn, Favorite, Note, StudySession, UserSettings, AIModel)
+                     DailyCheckIn, Favorite, Note, StudySession, UserSettings, AIModel, StudyRecord)
 
 
 @admin.register(Unit)
@@ -48,6 +48,14 @@ class NoteAdmin(admin.ModelAdmin):
 @admin.register(StudySession)
 class StudySessionAdmin(admin.ModelAdmin):
     list_display = ['date', 'mode', 'words_count', 'correct_count']
+
+
+@admin.register(StudyRecord)
+class StudyRecordAdmin(admin.ModelAdmin):
+    list_display = ['created_at', 'word', 'action', 'source', 'mode']
+    list_filter = ['source', 'action']
+    search_fields = ['word__word']
+    date_hierarchy = 'created_at'
 
 
 @admin.register(UserSettings)
