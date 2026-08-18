@@ -35,6 +35,7 @@ from .ai_prompts import (
 from .ai_exam_prompts import (
     build_vocabulary_profile, essay_generation_prompt, essay_grading_prompt,
     translation_help_prompt, translation_grading_prompt, themes_report_prompt,
+    personal_template_prompt,
 )
 
 
@@ -620,8 +621,22 @@ def api_words(request):
     unit = request.GET.get('unit', '')
     status = request.GET.get('status', '')
     sort = request.GET.get('sort', '')
-    page = int(request.GET.get('page', 1))
-    per_page = int(request.GET.get('per_page', 50))
+
+    # 分页参数校验：非法值回退到默认值，per_page 限制上限防止内存耗尽
+    try:
+        page = int(request.GET.get('page', 1))
+    except (TypeError, ValueError):
+        page = 1
+    if page < 1:
+        page = 1
+    try:
+        per_page = int(request.GET.get('per_page', 50))
+    except (TypeError, ValueError):
+        per_page = 50
+    if per_page < 1:
+        per_page = 50
+    elif per_page > 200:
+        per_page = 200
 
     qs = Word.objects.select_related('unit', 'progress').all()
     if search:
@@ -629,7 +644,12 @@ def api_words(request):
     if category:
         qs = qs.filter(category=category)
     if unit:
-        qs = qs.filter(unit__number=int(unit))
+        try:
+            unit_num = int(unit)
+        except (TypeError, ValueError):
+            return JsonResponse({'words': [], 'total': 0, 'page': page,
+                                 'total_excluded': 0})
+        qs = qs.filter(unit__number=unit_num)
     if status:
         if status == 'unknown':
             qs = qs.filter(
@@ -1184,8 +1204,6 @@ def api_reset_progress(request):
             message = '已清空全部学习进度'
         elif scope == 'unit':
             unit_number = data.get('unit_number')
-            Word.objects.filter(unit__number=unit_number).update(
-                progress=None)
             StudyProgress.objects.filter(word__unit__number=unit_number).delete()
             message = f'已清空 List {unit_number} 的学习进度'
         else:
@@ -4293,16 +4311,19 @@ def builtin_ai_exam_call(prompt, temperature=0.7, data=None, action='exam_genera
         headers=build_ai_headers(cfg['api_key']),
         method='POST',
     )
-    duration_ms = int((_time.monotonic() - t0) * 1000)
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:
             result = json.loads(resp.read().decode('utf-8'))
+        # 在 HTTP 请求完成后计算真实耗时（包含网络 + AI 生成时间）
+        duration_ms = int((_time.monotonic() - t0) * 1000)
     except urllib.error.HTTPError as e:
+        duration_ms = int((_time.monotonic() - t0) * 1000)
         body = e.read().decode('utf-8', 'ignore')
         err = f'AI 接口错误 (HTTP {e.code}): {body[:300]}'
         _log_ai_call(action, practice, cfg['model_id'], False, err, prompt, t0, duration_ms)
         return None, err
     except urllib.error.URLError as e:
+        duration_ms = int((_time.monotonic() - t0) * 1000)
         err = f'无法连接 AI 服务: {e.reason}'
         _log_ai_call(action, practice, cfg['model_id'], False, err, prompt, t0, duration_ms)
         return None, err
@@ -4352,7 +4373,7 @@ def exam_workshop(request):
         'phrases': WritingPhrase.objects.filter(is_collected=True).count(),
     }
     # 最近练习
-    recent = WritingPractice.objects.select_related('question').all()[:8]
+    recent = WritingPractice.objects.select_related('question').exclude(question__isnull=True).all()[:8]
     return render(request, 'exam_workshop.html', {
         'stats': stats,
         'recent_practices': recent,
@@ -4467,7 +4488,7 @@ def exam_phrases_page(request):
 
 def exam_history_page(request):
     """练习历史列表页：展示全部写作/翻译练习记录"""
-    qs = WritingPractice.objects.select_related('question').order_by('-created_at')
+    qs = WritingPractice.objects.select_related('question').exclude(question__isnull=True).order_by('-created_at')
     exam_type = request.GET.get('exam_type', '')
     qtype = request.GET.get('type', '')
     source = request.GET.get('source', '')
@@ -4743,6 +4764,392 @@ def api_exam_themes_report(request):
     if err:
         return JsonResponse({'error': err}, status=502)
     return JsonResponse({'success': True, 'content': content.strip()})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_exam_personal_template(request):
+    """生成用户专属作文模板：结合词汇画像 + 历史练习记录（得分、错误点、优秀表达）"""
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        data = {}
+
+    profile = build_vocabulary_profile()
+
+    # 收集历史练习摘要（排除模板记录：question=None）
+    recents = WritingPractice.objects.select_related('question').exclude(question__isnull=True).order_by('-created_at')[:10]
+    lines = []
+    scores = []
+    for p in recents:
+        s = p.get_score()
+        total = s.get('total') if isinstance(s, dict) else None
+        if total:
+            try:
+                scores.append(float(total))
+            except (TypeError, ValueError):
+                pass
+        lines.append(
+            f"- {p.created_at.strftime('%Y-%m-%d')} "
+            f"{p.question.get_exam_type_display()}（{p.question.year}）"
+            f"{p.question.get_question_type_display()}（{'AI' if p.source == 'ai' else '手动'}）"
+            f"{('得分 ' + str(total)) if total else ''}"
+        )
+    practice_part = ['最近练习记录：'] + (lines or ['（暂无练习记录）'])
+
+    if scores:
+        avg = round(sum(scores) / len(scores), 1)
+        practice_part.append(f'批改平均得分：{avg} 分（最高分参考）。')
+
+    # 常犯错误 + 优秀表达（从沉淀的好句本取）
+    errors = WritingPhrase.objects.filter(phrase_type='error').order_by('-created_at')[:8]
+    replaces = WritingPhrase.objects.filter(phrase_type='replace').order_by('-created_at')[:8]
+    if errors:
+        practice_part.append('历史批改中常犯错误：')
+        for e in errors:
+            practice_part.append(f'- {e.phrase}{("（" + e.meaning + "）") if e.meaning else ""}')
+    if replaces:
+        practice_part.append('历史批改推荐的高级表达：')
+        for r in replaces:
+            practice_part.append(f'- {r.phrase}{("（" + r.meaning + "）") if r.meaning else ""}')
+    if not errors and not replaces and not lines:
+        practice_part.append('暂无历史批改数据，请先尝试「AI 代写」或「自己写 → AI 批改」，模板将更精准。')
+
+    practice_summary = '\n'.join(practice_part)
+    prompt = personal_template_prompt(profile, practice_summary)
+    content, err = builtin_ai_exam_call(prompt, temperature=0.6, data=data, action='exam_template')
+    if err:
+        return JsonResponse({'error': err}, status=502)
+
+    # 保存模板为一条练习记录（source=tmpl，便于复现）
+    practice = WritingPractice.objects.create(
+        mode='essay',
+        source='template',
+        ai_output=content.strip(),
+    )
+    _bind_practice_to_last_log('exam_template', practice)
+    return JsonResponse({'success': True, 'content': content.strip(), 'practice_id': practice.id,
+                         'has_practice': bool(recents), 'practice_count': len(recents)})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_exam_export_pdf(request):
+    """导出专属作文模板为 PDF：接收 {title, content}，将 AI 生成的 Markdown 排版为可下载的 PDF"""
+    import re as _re
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                     TableStyle, Flowable)
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+
+    title = (data.get('title') or '我的专属作文模板').strip()
+    content = data.get('content') or ''
+    if not content.strip():
+        return JsonResponse({'error': '没有可导出的内容'}, status=400)
+
+    pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
+    re = _re  # 统一使用别名模块，避免重复 import
+    RED = colors.HexColor('#8b0000')
+    LIGHT_BG = colors.HexColor('#faf5f5')
+    BORDER = colors.HexColor('#e5d7d7')
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            topMargin=18 * mm, bottomMargin=18 * mm,
+                            leftMargin=16 * mm, rightMargin=16 * mm,
+                            title=title, author='考研英语学习平台')
+
+    # ========== 样式定义 ==========
+    s_title = ParagraphStyle('t', fontName='STSong-Light', fontSize=18,
+                              leading=26, alignment=TA_CENTER, spaceAfter=4,
+                              textColor=RED, fontName_CJK='STSong-Light')
+    s_meta = ParagraphStyle('m', fontName='STSong-Light', fontSize=8.5,
+                             leading=12, alignment=TA_CENTER, textColor=colors.grey,
+                             spaceAfter=2)
+    s_h1 = ParagraphStyle('h1', fontName='STSong-Light', fontSize=14, leading=20,
+                           spaceBefore=12, spaceAfter=6, textColor=RED)
+    s_h2 = ParagraphStyle('h2', fontName='STSong-Light', fontSize=12, leading=18,
+                           spaceBefore=10, spaceAfter=5, textColor=RED,
+                           borderPadding=(0, 0, 4, 0))
+    s_h3 = ParagraphStyle('h3', fontName='STSong-Light', fontSize=10.5, leading=16,
+                           spaceBefore=8, spaceAfter=3, textColor=colors.HexColor('#551a1a'))
+    s_h4 = ParagraphStyle('h4', fontName='STSong-Light', fontSize=10, leading=15,
+                           spaceBefore=6, spaceAfter=2, textColor=colors.HexColor('#666'))
+    s_body = ParagraphStyle('b', fontName='STSong-Light', fontSize=9.5, leading=16,
+                             spaceAfter=4)
+    s_ul = ParagraphStyle('ul', parent=s_body, leftIndent=14, bulletIndent=2,
+                           spaceAfter=2)
+    s_ol = ParagraphStyle('ol', parent=s_body, leftIndent=16, bulletIndent=2,
+                           spaceAfter=2)
+    s_code = ParagraphStyle('code', fontName='STSong-Light', fontSize=9, leading=14,
+                             backColor=LIGHT_BG, borderPadding=(3, 6, 3, 6),
+                             borderColor=BORDER, borderWidth=0.5, textColor=RED,
+                             spaceBefore=2, spaceAfter=2)
+    s_quote = ParagraphStyle('q', parent=s_body, leftIndent=18, spaceBefore=4,
+                              spaceAfter=4, textColor=colors.HexColor('#555'),
+                              fontSize=9.3)
+    s_th = ParagraphStyle('th', fontName='STSong-Light', fontSize=9.3, leading=14,
+                           textColor=colors.white, fontName_CJK='STSong-Light')
+    s_td = ParagraphStyle('td', fontName='STSong-Light', fontSize=9, leading=14)
+
+    # ========== 工具函数 ==========
+    def esc(t):
+        return (t.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                .replace('"', '&quot;'))
+
+    def inline(txt):
+        """转换 Markdown 内联标记为 ReportLab Paragraph 支持的 HTML"""
+        t = esc(txt)
+        # **bold** → <b>
+        while '**' in t:
+            a = t.find('**')
+            b = t.find('**', a + 2)
+            if b == -1:
+                break
+            t = t[:a] + '<b>' + t[a + 2:b] + '</b>' + t[b + 2:]
+        # *italic* → <i> (avoid matching **)
+        t = re.sub(r'(^|[^*])\*([^*\n]+)\*(?!\*)', r'\1<i>\2</i>', t)
+        # `code` → red monospace font
+        def _code(m):
+            return ('<font name="Courier" color="#8b0000" size="8.5">%s</font>'
+                    % m.group(1))
+        t = re.sub(r'`([^`]+)`', _code, t)
+        # ~~strike~~ (just in case)
+        t = re.sub(r'~~([^~]+)~~', r'<strike>\1</strike>', t)
+        return t
+
+    def hr_flowable():
+        """水平线：用 1x1 Table 模拟"""
+        t = Table([['']],colWidths=[doc.width], rowHeights=[0.5])
+        t.setStyle(TableStyle([
+            ('LINEBELOW', (0, 0), (-1, -1), 0.5, BORDER),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        return t
+
+    def quote_flowable(text_lines):
+        """引用块：左侧红色竖条 + 缩进 + 浅底"""
+        inner = '<br/>'.join(inline(l) for l in text_lines)
+        # 用两列表格模拟：左列是红色竖条(宽度小)，右列是文字
+        quote_text = Paragraph(inner, s_quote)
+        tbl = Table([['', quote_text]], colWidths=[2.5 * mm, doc.width - 2.5 * mm - 8 * mm])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, 0), RED),
+            ('BACKGROUND', (1, 0), (1, 0), LIGHT_BG),
+            ('LEFTPADDING', (0, 0), (0, 0), 0),
+            ('RIGHTPADDING', (0, 0), (0, 0), 0),
+            ('TOPPADDING', (0, 0), (0, 0), 8),
+            ('BOTTOMPADDING', (0, 0), (0, 0), 8),
+            ('LEFTPADDING', (1, 0), (1, 0), 8),
+            ('RIGHTPADDING', (1, 0), (1, 0), 8),
+            ('TOPPADDING', (1, 0), (1, 0), 6),
+            ('BOTTOMPADDING', (1, 0), (1, 0), 6),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('ROUNDEDCORNERS', [1, 1, 1, 1]),
+        ]))
+        return tbl
+
+    def is_pipe_row(s):
+        return s.count('|') >= 2 and '|' in s
+
+    def is_sep_row(s):
+        stripped = s.strip().lstrip('|').rstrip('|').strip()
+        if not stripped:
+            return False
+        parts = [p.strip() for p in stripped.split('|')]
+        return len(parts) >= 2 and all(
+            re.match(r'^:?-{3,}:?$', p) for p in parts if p != ''
+        )
+
+    def split_row(s):
+        t = s.strip()
+        if t.startswith('|'):
+            t = t[1:]
+        if t.endswith('|'):
+            t = t[:-1]
+        return [c.strip() for c in t.split('|')]
+
+    def render_table(header, body_rows):
+        """渲染 Markdown 表格为 ReportLab Table"""
+        # 计算列宽：平均分配 doc.width
+        col_count = len(header)
+        col_w = doc.width / col_count
+        # 确保最后一列不会溢出
+        col_widths = [doc.width / col_count] * col_count
+        # 表头
+        th_cells = [Paragraph(inline(h), s_th) for h in header]
+        data = [th_cells]
+        for row in body_rows:
+            padded = row + [''] * (col_count - len(row))
+            data.append([Paragraph(inline(c), s_td) for c in padded[:col_count]])
+        tbl = Table(data, colWidths=col_widths, repeatRows=1)
+        style_cmds = [
+            # 表头样式
+            ('BACKGROUND', (0, 0), (-1, 0), RED),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'STSong-Light'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9.3),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 7),
+            ('TOPPADDING', (0, 0), (-1, 0), 7),
+            # 单元格内边距
+            ('LEFTPADDING', (0, 0), (-1, -1), 7),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 7),
+            ('TOPPADDING', (0, 1), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            # 边框
+            ('GRID', (0, 0), (-1, -1), 0.4, BORDER),
+        ]
+        # 斑马纹
+        for i in range(1, len(data)):
+            if i % 2 == 0:
+                style_cmds.append(('BACKGROUND', (0, i), (-1, i), LIGHT_BG))
+        tbl.setStyle(TableStyle(style_cmds))
+        return tbl
+
+    # ========== 开始构建 PDF ==========
+    elements = [
+        Paragraph(inline(title), s_title),
+        Paragraph('考研英语学习平台 · 专属作文模板 · 生成于 %s' %
+                  timezone.localdate().strftime('%Y年%m月%d日'), s_meta),
+        hr_flowable(),
+        Spacer(1, 3 * mm),
+    ]
+
+    lines = content.split('\n')
+    i = 0
+    n = len(lines)
+    while i < n:
+        raw = lines[i].rstrip()
+        s = raw.strip()
+        i += 1
+
+        if not s:
+            continue
+
+        # 标题
+        m = re.match(r'^(#{1,4})\s+(.*)$', s)
+        if m:
+            level = len(m.group(1))
+            txt = m.group(2)
+            if level == 1:
+                p = Paragraph(inline(txt), s_h1)
+                elements.append(p)
+                # H1 下面加一条红色分割线
+                elements.append(hr_flowable())
+            elif level == 2:
+                elements.append(Paragraph(inline(txt), s_h2))
+            elif level == 3:
+                elements.append(Paragraph(inline(txt), s_h3))
+            else:
+                elements.append(Paragraph(inline(txt), s_h4))
+            continue
+
+        # HR --- 或 ***
+        if re.match(r'^\s*(-{3,}|\*{3,})\s*$', s):
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(hr_flowable())
+            elements.append(Spacer(1, 2 * mm))
+            continue
+
+        # Blockquote > (连续多行)
+        if re.match(r'^\s*>\s?', s):
+            q_lines = []
+            while True:
+                q_lines.append(re.sub(r'^\s*>\s?', '', s))
+                if i < n and re.match(r'^\s*>\s?', lines[i].strip()):
+                    s = lines[i].strip()
+                    i += 1
+                else:
+                    break
+            elements.append(quote_flowable(q_lines))
+            continue
+
+        # 代码块 ``` (仅简单支持，把它当 code 样式段落)
+        if re.match(r'^\s*```', s):
+            buf_code = []
+            while i < n and not re.match(r'^\s*```', lines[i]):
+                buf_code.append(lines[i].rstrip())
+                i += 1
+            if i < n:
+                i += 1  # skip closing ```
+            code_text = '<br/>'.join(esc(c) for c in buf_code)
+            p_code = Paragraph(code_text, ParagraphStyle(
+                'blkcode', parent=s_code, fontName='Courier', textColor=colors.black))
+            elements.append(p_code)
+            continue
+
+        # 无序列表 - 或 *
+        if re.match(r'^\s*[-*+]\s+', s):
+            items = []
+            while True:
+                items.append(re.sub(r'^\s*[-*+]\s+', '', s))
+                if i < n and re.match(r'^\s*[-*+]\s+', lines[i].strip()):
+                    s = lines[i].strip()
+                    i += 1
+                else:
+                    break
+            for it in items:
+                elements.append(Paragraph('•  ' + inline(it), s_ul))
+            continue
+
+        # 有序列表 1. 2. 或 1) 2)
+        if re.match(r'^\s*\d+[.)]\s+', s):
+            items = []
+            start_num = int(re.match(r'^\s*(\d+)[.)]\s+', s).group(1))
+            while True:
+                items.append(re.sub(r'^\s*\d+[.)]\s+', '', s))
+                if i < n and re.match(r'^\s*\d+[.)]\s+', lines[i].strip()):
+                    s = lines[i].strip()
+                    i += 1
+                else:
+                    break
+            for idx, it in enumerate(items):
+                num = idx + start_num
+                elements.append(Paragraph('%d.  %s' % (num, inline(it)), s_ol))
+            continue
+
+        # Markdown 表格：如果当前行像表头，且下一行是分隔符行
+        # 注意：因为已经 i += 1 过，所以当前 lines[i-1] 是本行，检查下一行 lines[i]
+        if is_pipe_row(s) and i < n and is_sep_row(lines[i].strip()):
+            header = split_row(s)
+            i += 1  # 跳过分隔行
+            body_rows = []
+            while i < n and is_pipe_row(lines[i].strip()):
+                body_rows.append(split_row(lines[i].strip()))
+                i += 1
+            if header and len(header) >= 2:
+                elements.append(Spacer(1, 1.5 * mm))
+                elements.append(render_table(header, body_rows))
+                elements.append(Spacer(1, 1.5 * mm))
+            continue
+
+        # 独立加粗段（整行 **...**）
+        if s.startswith('**') and s.endswith('**') and s.count('**') == 2:
+            elements.append(Paragraph('<b>' + inline(s[2:-2]) + '</b>',
+                                      ParagraphStyle('strongline', parent=s_body,
+                                                     spaceBefore=4, textColor=RED)))
+            continue
+
+        # 普通段落
+        elements.append(Paragraph(inline(s), s_body))
+
+    doc.build(elements)
+    buf.seek(0)
+    return FileResponse(buf, content_type='application/pdf',
+                        filename='我的专属作文模板_%s.pdf' % timezone.localdate().strftime('%Y%m%d'),
+                        as_attachment=True)
 
 
 @csrf_exempt

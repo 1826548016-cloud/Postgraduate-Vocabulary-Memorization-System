@@ -98,6 +98,8 @@ urlpatterns = [
     path('api/exam/translate-analyze/', views.api_exam_translate_analyze, name='api_exam_translate_analyze'),
     path('api/exam/grade-translation/', views.api_exam_grade_translation, name='api_exam_grade_translation'),
     path('api/exam/themes-report/', views.api_exam_themes_report, name='api_exam_themes_report'),
+    path('api/exam/personal-template/', views.api_exam_personal_template, name='api_exam_personal_template'),
+    path('api/exam/export-pdf/', views.api_exam_export_pdf, name='api_exam_export_pdf'),
     path('api/exam/phrase-toggle/', views.api_exam_phrase_toggle, name='api_exam_phrase_toggle'),
     path('api/exam/logs/', views.api_exam_logs, name='api_exam_logs'),
 ]

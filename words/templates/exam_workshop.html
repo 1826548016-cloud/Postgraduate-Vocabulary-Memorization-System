@@ -96,6 +96,25 @@
         <div class="report-loading text-secondary text-sm">AI 正在分析历年真题规律，请稍候…</div>
         <div id="themesReport" class="markdown-body" style="margin-top: 12px;"></div>
       </div>
+
+      <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--c-border-light);">
+        <div style="font-weight:500; margin-bottom: 6px; display:flex; align-items:center; gap:8px;">
+          <i class="ph ph-user-circle" style="color: var(--c-red);"></i> 我的专属作文模板
+        </div>
+        <p class="text-secondary" style="font-size: var(--fs-sm); margin: 0 0 12px; line-height:1.7;">
+          综合你已掌握的词汇与历史练习记录，AI 为你量身定制可背诵、可套用的个人作文模板。
+        </p>
+        <button class="btn btn-primary btn-sm" onclick="genPersonalTemplate()">
+          <i class="ph ph-magic-wand"></i> 生成我的专属模板
+        </button>
+        <button id="tmplExportBtn" class="btn btn-secondary btn-sm" style="display:none;" onclick="exportTemplatePdf()">
+          <i class="ph ph-file-pdf"></i> 导出为 PDF
+        </button>
+        <div id="tmplWrap" style="display:none; margin-top: 14px;">
+          <div class="report-loading text-secondary text-sm">AI 正在结合你的词汇与练习记录生成模板，通常需要 15-30 秒…</div>
+          <div id="personalTempl" class="markdown-body" style="margin-top: 12px;"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -115,6 +134,7 @@
         <table class="word-table">
           <tbody>
             {% for p in recent_practices %}
+            {% if p.question %}
             <tr style="border-bottom:1px solid var(--c-border-light);">
               <td><span class="date-chip">{{ p.question.year }}</span></td>
               <td>{{ p.question.get_exam_type_display|slice:":2" }}</td>
@@ -128,6 +148,7 @@
               <td class="text-secondary text-xs">{{ p.created_at|date:"m-d" }}</td>
               <td><a href="{% url 'words:exam_write' p.question.id %}" class="btn btn-secondary btn-xs">续写</a></td>
             </tr>
+            {% endif %}
             {% endfor %}
           </tbody>
         </table>
@@ -145,6 +166,59 @@
 
 {% block extra_scripts %}
 <script>
+var _lastTemplate = '';
+function genPersonalTemplate() {
+  var wrap = document.getElementById('tmplWrap');
+  var box = document.getElementById('personalTempl');
+  wrap.style.display = 'block';
+  box.innerHTML = '';
+  showToast('AI 正在生成你的专属模板…', 'success');
+  VOCAB_API.post('{% url "words:api_exam_personal_template" %}', {}).then(function (res) {
+    if (res.success) {
+      _lastTemplate = res.content || '';
+      box.innerHTML = renderMarkdown(res.content);
+      document.getElementById('tmplExportBtn').style.display = 'inline-flex';
+      showToast('专属模板已生成', 'success');
+    } else {
+      box.innerHTML = '<div class="empty-state">' + (res.error || '生成失败') + '</div>';
+      document.getElementById('tmplExportBtn').style.display = 'none';
+      showToast(res.error || '生成失败，请检查模型配置', 'error');
+    }
+  }).catch(function (e) {
+    box.innerHTML = '<div class="empty-state">请求失败，请检查网络或模型配置</div>';
+    document.getElementById('tmplExportBtn').style.display = 'none';
+    showToast('请求失败', 'error');
+  });
+}
+
+function exportTemplatePdf() {
+  if (!_lastTemplate) { showToast('请先生成模板', 'error'); return; }
+  var csrf = document.querySelector('[name=csrfmiddlewaretoken]');
+  fetch('{% url "words:api_exam_export_pdf" %}', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': csrf ? csrf.value : '',
+    },
+    body: JSON.stringify({ title: '我的专属作文模板', content: _lastTemplate }),
+  }).then(function (r) {
+    if (!r.ok) { throw new Error('HTTP ' + r.status); }
+    return r.blob();
+  }).then(function (blob) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = '我的专属作文模板.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast('已导出 PDF', 'success');
+  }).catch(function (e) {
+    showToast('导出失败：' + e.message, 'error');
+  });
+}
+
 function genThemesReport(examType) {
   var wrap = document.getElementById('themesReportWrap');
   var box = document.getElementById('themesReport');
@@ -204,6 +278,45 @@ function renderMarkdown(src) {
       flushPara(); var ol = [];
       while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) { ol.push('<li>' + inline(lines[i].replace(/^\s*\d+[.)]\s+/, '')) + '</li>'); i++; }
       html += '<ol>' + ol.join('') + '</ol>'; continue;
+    }
+    // Markdown 表格解析：| 表头 | 表头 | + |---|---| + | 数据 | 数据 |
+    function isPipeRow(s) { return /^\s*\|?.*\|.*\|\s*$/.test(s) && s.indexOf('|') !== -1; }
+    function isSepRow(s) {
+      // 允许首列无空格前导 |，要求包含 ---|--- 模式
+      var stripped = s.trim().replace(/^\|/, '').replace(/\|$/, '');
+      if (!stripped) return false;
+      var parts = stripped.split('|');
+      if (parts.length < 2) return false;
+      return parts.every(function (p) { return /^\s*:?-{3,}:?\s*$/.test(p); });
+    }
+    function splitRow(s) {
+      var t = s.trim();
+      if (t.charAt(0) === '|') t = t.slice(1);
+      if (t.charAt(t.length - 1) === '|') t = t.slice(0, -1);
+      return t.split('|').map(function (c) { return c.trim(); });
+    }
+    if (isPipeRow(line) && i + 1 < lines.length && isSepRow(lines[i + 1])) {
+      flushPara();
+      var header = splitRow(line); i++; // 跳到分隔行
+      i++; // 跳过分隔行
+      var bodyRows = [];
+      while (i < lines.length && isPipeRow(lines[i])) {
+        bodyRows.push(splitRow(lines[i]));
+        i++;
+      }
+      html += '<div class="md-table-wrap"><table class="md-table"><thead><tr>';
+      for (var hi = 0; hi < header.length; hi++) html += '<th>' + inline(header[hi]) + '</th>';
+      html += '</tr></thead><tbody>';
+      for (var bi = 0; bi < bodyRows.length; bi++) {
+        html += '<tr>';
+        for (var ci = 0; ci < bodyRows[bi].length; ci++) {
+          html += '<td>' + inline(bodyRows[bi][ci]) + '</td>';
+        }
+        while (ci < header.length) { html += '<td></td>'; ci++; }
+        html += '</tr>';
+      }
+      html += '</tbody></table></div>';
+      continue;
     }
     para.push(line); i++;
   }

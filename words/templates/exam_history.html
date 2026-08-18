@@ -66,6 +66,7 @@
       <tbody>
         {% for p in practices %}
         {% with s=p.get_score %}
+        {% if p.question %}
         <tr>
           <td class="text-secondary text-sm">{{ p.created_at|date:"Y-m-d H:i" }}</td>
           <td>{{ p.question.year }}</td>
@@ -111,6 +112,7 @@
             </div>
           </td>
         </tr>
+        {% endif %}
         {% endwith %}
         {% endfor %}
       </tbody>

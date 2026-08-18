@@ -637,8 +637,8 @@ class WritingPractice(models.Model):
     ]
     user = models.ForeignKey('auth.User', null=True, blank=True,
         on_delete=models.SET_NULL, verbose_name='用户')
-    question = models.ForeignKey(ExamQuestion, on_delete=models.CASCADE,
-        related_name='practices', verbose_name='真题')
+    question = models.ForeignKey(ExamQuestion, null=True, blank=True,
+        on_delete=models.CASCADE, related_name='practices', verbose_name='真题')
     mode = models.CharField(max_length=20, choices=MODE_CHOICES, default='essay',
         verbose_name='练习类型')
     source = models.CharField(max_length=20, default='ai', verbose_name='来源',
@@ -696,6 +696,7 @@ class AICallLog(models.Model):
         ('exam_grade_translation', '译文批改'),
         ('exam_translate_analyze', '翻译拆解'),
         ('exam_themes_report', '命题规律分析'),
+        ('exam_template', '专属模板'),
     ]
     user = models.ForeignKey('auth.User', null=True, blank=True,
         on_delete=models.SET_NULL, verbose_name='用户')

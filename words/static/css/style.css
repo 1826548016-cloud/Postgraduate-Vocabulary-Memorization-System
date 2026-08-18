@@ -955,17 +955,39 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 .study-tile-title { font-weight: 600; font-size: var(--fs-base); }
 .study-tile-desc { font-size: var(--fs-xs); color: var(--c-text-3); line-height: 1.4; }
 
-.markdown-body { line-height: 1.75; font-size: var(--fs-base); word-break: break-word; }
-.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 { margin: 14px 0 8px; line-height: 1.4; }
-.markdown-body h1 { font-size: 1.3rem; } .markdown-body h2 { font-size: 1.2rem; } .markdown-body h3 { font-size: 1.08rem; }
+.markdown-body { line-height: 1.8; font-size: var(--fs-base); word-break: break-word; color: var(--c-text); }
+.markdown-body > *:first-child { margin-top: 0 !important; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 { margin: 18px 0 10px; line-height: 1.45; font-weight: 700; }
+.markdown-body h1 { font-size: 1.5rem; padding-bottom: 10px; border-bottom: 2px solid var(--c-red); color: var(--c-red); }
+.markdown-body h2 { font-size: 1.25rem; padding-bottom: 6px; border-bottom: 1px dashed var(--c-border); color: var(--c-red); }
+.markdown-body h3 { font-size: 1.1rem; color: var(--c-text); }
+.markdown-body h4 { font-size: 1rem; color: var(--c-text-2); }
 .markdown-body p { margin: 8px 0; }
-.markdown-body ul, .markdown-body ol { margin: 8px 0; padding-left: 24px; }
-.markdown-body li { margin: 4px 0; }
-.markdown-body blockquote { margin: 8px 0; padding: 6px 14px; border-left: 3px solid var(--c-red); background: var(--c-surface-2); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
-.markdown-body code { background: var(--c-surface-2); padding: 2px 6px; border-radius: 4px; font-family: Consolas, monospace; font-size: .9em; }
-.markdown-body pre { background: var(--c-surface-2); padding: 12px; border-radius: var(--radius-sm); overflow-x: auto; border: 1px solid var(--c-border-light); }
-.markdown-body pre code { background: transparent; padding: 0; }
-.markdown-body strong { color: var(--c-text); }
+.markdown-body ul, .markdown-body ol { margin: 10px 0; padding-left: 26px; }
+.markdown-body li { margin: 5px 0; }
+.markdown-body ol { list-style: decimal; }
+.markdown-body ul { list-style: disc; }
+.markdown-body blockquote { margin: 10px 0; padding: 10px 16px; border-left: 4px solid var(--c-red); background: linear-gradient(90deg, rgba(139,0,0,.06), transparent); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--c-text-2); font-size: .98em; }
+.markdown-body hr { border: none; height: 1px; background: linear-gradient(90deg, transparent, var(--c-border-light), transparent); margin: 20px 0; }
+.markdown-body code { background: var(--c-surface-2); padding: 2px 7px; border-radius: 4px; font-family: Consolas, Menlo, monospace; font-size: .88em; color: var(--c-red); border: 1px solid var(--c-border-light); }
+.markdown-body pre { background: var(--c-surface-2); padding: 14px 16px; border-radius: var(--radius-sm); overflow-x: auto; border: 1px solid var(--c-border-light); margin: 10px 0; }
+.markdown-body pre code { background: transparent; padding: 0; border: none; color: inherit; }
+.markdown-body strong { color: var(--c-red); font-weight: 700; }
+.markdown-body em { font-style: italic; color: var(--c-text-2); }
+
+/* Markdown 表格样式 */
+.md-table-wrap { margin: 14px 0; overflow-x: auto; border: 1px solid var(--c-border-light); border-radius: var(--radius-sm); background: var(--c-surface); }
+.md-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.md-table thead th { background: var(--c-red); color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; border: none; }
+.md-table thead th:first-child { border-top-left-radius: calc(var(--radius-sm) - 1px); }
+.md-table thead th:last-child { border-top-right-radius: calc(var(--radius-sm) - 1px); }
+.md-table tbody tr:nth-child(even) { background: var(--c-surface-2); }
+.md-table tbody tr:hover { background: rgba(139,0,0,.05); }
+.md-table tbody td { padding: 9px 14px; border-top: 1px solid var(--c-border-light); vertical-align: top; line-height: 1.6; }
+.md-table tbody td + td { border-left: 1px solid var(--c-border-light); }
+
+/* 专属模板容器——给模板一个卡片式外观 */
+#personalTempl { background: var(--c-surface); border: 1px solid var(--c-border-light); border-radius: var(--radius-md); padding: 22px 26px; margin-top: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.04); }
 .model-box { background: var(--c-surface-2); border: 1px solid var(--c-border-light); border-radius: var(--radius-sm); padding: 14px 16px; margin-top: 8px; line-height: 1.7; }
 .report-loading { display: flex; align-items: center; gap: 10px; color: var(--c-text-2); padding: 20px; }
 .report-loading::before { content: ''; width: 16px; height: 16px; border: 2px solid var(--c-border); border-top-color: var(--c-red); border-radius: 50%; animation: vocab-spin .8s linear infinite; }
