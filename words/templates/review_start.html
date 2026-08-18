@@ -24,17 +24,84 @@
   .unit-choice:hover { transform: translateY(-1px); border-color: var(--c-purple, #8a6f9e); }
   .learn-start-submit { margin-top: 16px; display: flex; justify-content: flex-end; }
   @media (max-width: 640px) { .setup-row { grid-template-columns: 1fr; } .learn-start-submit .btn { width: 100%; } }
+
+  /* 快速开始 */
+  .quick-start-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .quick-card, button.quick-card { display: block; width: 100%; text-align: left; padding: 18px; border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface); text-decoration: none; color: inherit; font: inherit; transition: transform .15s, border-color .15s, box-shadow .15s; cursor: pointer; }
+  .quick-card:hover { transform: translateY(-2px); border-color: var(--c-purple, #8a6f9e); box-shadow: var(--shadow-md); }
+  button.quick-card:hover { background: var(--c-surface); }
+  .preset-card { position: relative; }
+  .preset-delete { opacity: 0.7; padding: 4px 6px; }
+  .preset-delete:hover { opacity: 1; }
+  .quick-icon { font-size: 1.75rem; color: var(--c-purple, #8a6f9e); margin-bottom: 8px; }
+  .quick-title { font-weight: 700; font-size: var(--fs-lg); margin-bottom: 4px; }
+  .quick-desc { font-size: var(--fs-sm); color: var(--c-text-2); line-height: 1.5; }
+  .custom-setup-details { border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface); }
+  .custom-setup-details > summary { padding: 14px 18px; cursor: pointer; list-style: none; font-weight: 600; margin-bottom: 0; }
+  .custom-setup-details > summary::-webkit-details-marker { display: none; }
+  .custom-setup-details > summary::after { content: '+'; float: right; color: var(--c-text-2); }
+  .custom-setup-details[open] > summary::after { content: '−'; }
+  .custom-setup-details > .custom-setup { border: none; border-radius: 0; }
+  @media (max-width: 640px) { .quick-start-grid { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
 
 {% block content %}
 <form id="reviewForm" class="learn-setup" action="{% url 'words:review_session' %}" method="get">
+  {% csrf_token %}
 
   <h2 class="setup-title">开始复习</h2>
-  <p class="setup-subtitle" style="margin-bottom: 20px;">选择要复习的范围（单元与掌握状态），从已学词汇中随机抽取。</p>
+  <p class="setup-subtitle" style="margin-bottom: 20px;">点一下就能开始，高级设置可以展开调整。</p>
 
-  <div class="card custom-setup">
-    <div class="card-header">复习设置</div>
+  <!-- 快速开始 -->
+  <div class="card" style="margin-bottom: 20px;">
+    <div class="card-header">快速开始</div>
+    <div class="quick-start-grid">
+      <a href="{% url 'words:review_session' %}?scope=all&mode=random&batch={{ batch_size }}&count={{ daily_review_target|default:50 }}" class="quick-card">
+        <div class="quick-icon"><i class="ph ph-arrows-clockwise"></i></div>
+        <div class="quick-title">今日复习</div>
+        <div class="quick-desc">从全部已学词中随机抽取 {{ daily_review_target|default:50 }} 个</div>
+      </a>
+      <a href="{% url 'words:review_session' %}?scope=unmastered&mode=random&batch={{ batch_size }}&count=20" class="quick-card">
+        <div class="quick-icon"><i class="ph ph-target"></i></div>
+        <div class="quick-title">复习未掌握</div>
+        <div class="quick-desc">只复习还没背会的单词，随机 20 个</div>
+      </a>
+      <a href="{% url 'words:review_session' %}?scope=all&mode=random&batch={{ batch_size }}&count=20" class="quick-card">
+        <div class="quick-icon"><i class="ph ph-shuffle"></i></div>
+        <div class="quick-title">随机抽查</div>
+        <div class="quick-desc">任意已学词中随机抽查 20 个</div>
+      </a>
+      <a href="{% url 'words:review_session' %}?scope=mastered&mode=random&batch={{ batch_size }}&count=20" class="quick-card">
+        <div class="quick-icon"><i class="ph ph-star"></i></div>
+        <div class="quick-title">巩固已掌握</div>
+        <div class="quick-desc">复习已掌握的单词，防止遗忘</div>
+      </a>
+      {% for preset in presets %}
+      <div class="quick-card preset-card" data-url="{% url 'words:review_session' %}?scope={{ preset.params.scope|default:'all' }}&mode={{ preset.params.mode|default:'random' }}&batch={{ preset.params.batch|default:batch_size }}&count={{ preset.params.count|default:daily_review_target|default:50 }}{% for u in preset.params.units|default_if_none:'' %}&units={{ u }}{% endfor %}" onclick="startPreset(this)">
+        <div class="flex justify-between items-start">
+          <div class="quick-icon"><i class="ph ph-lightning"></i></div>
+          <button type="button" class="btn btn-ghost btn-sm preset-delete" data-id="{{ preset.id }}" data-name="{{ preset.name }}" title="删除" onclick="event.stopPropagation(); deletePreset(this)"><i class="ph ph-trash"></i></button>
+        </div>
+        <div class="quick-title">{{ preset.name }}</div>
+        <div class="quick-desc">{{ preset.params.scope|default:'全部' }} · {{ preset.params.count|default:daily_review_target|default:50 }} 个</div>
+      </div>
+      {% endfor %}
+      <button type="button" class="quick-card" onclick="toggleCustomReview()">
+        <div class="quick-icon"><i class="ph ph-sliders-horizontal"></i></div>
+        <div class="quick-title">自定义</div>
+        <div class="quick-desc">自己选范围、数量、每批数和单元</div>
+      </button>
+    </div>
+  </div>
+
+  <details id="customReviewDetails" class="custom-setup-details">
+    <summary class="card-header">自定义复习</summary>
+    <div class="card custom-setup">
+      <div class="preset-save-row" style="display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap;">
+        <input type="text" id="presetName" class="form-input" placeholder="给这套配置起个名字" style="flex: 1; min-width: 160px;">
+        <button type="button" class="btn btn-secondary" onclick="saveReviewPreset()"><i class="ph ph-bookmark"></i> 保存为预设</button>
+      </div>
     <div class="setup-row">
       <div class="choice-group">
         <span class="choice-group-title">复习范围</span>
@@ -127,6 +194,7 @@
       </div>
     </div>
   </div>
+  </details>
 </form>
 {% endblock %}
 
@@ -177,6 +245,68 @@ function showToast(message, type) {
     toast.style.opacity = '0';
     setTimeout(() => toast.remove(), 300);
   }, 2500);
+}
+
+function toggleCustomReview() {
+  const details = document.getElementById('customReviewDetails');
+  if (!details) return;
+  details.open = !details.open;
+  if (details.open) {
+    details.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+async function saveReviewPreset() {
+  const nameInput = document.getElementById('presetName');
+  const name = (nameInput.value || '').trim();
+  if (!name) {
+    showToast('请输入预设名称', 'error');
+    return;
+  }
+  const form = document.getElementById('reviewForm');
+  const formData = new FormData(form);
+  const params = {};
+  formData.forEach((value, key) => {
+    if (key === 'csrfmiddlewaretoken') return;
+    if (key === 'units') {
+      params[key] = params[key] || [];
+      params[key].push(value);
+    } else {
+      params[key] = value;
+    }
+  });
+  try {
+    const res = await VOCAB_API.post('/api/preset/create/', { name: name, preset_type: 'review', params: params });
+    if (res.success) {
+      showToast(res.message, 'success');
+      setTimeout(function () { window.location.reload(); }, 500);
+    } else {
+      showToast(res.error || '保存失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
+}
+
+function startPreset(card) {
+  window.location.href = card.getAttribute('data-url');
+}
+
+async function deletePreset(btn) {
+  const id = btn.getAttribute('data-id');
+  const name = btn.getAttribute('data-name');
+  if (!id || !confirm('确定要删除预设"' + name + '"吗？')) return;
+  try {
+    const res = await VOCAB_API.post('/api/preset/delete/' + id + '/');
+    if (res.success) {
+      showToast(res.message, 'success');
+      setTimeout(function () { window.location.reload(); }, 500);
+    } else {
+      showToast(res.error || '删除失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
 }
 </script>
 {% endblock %}

@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}练习历史 - 考研写作工坊{% endblock %}
+
+{% block page_title %}练习历史{% endblock %}
+
+{% block content %}
+<form style="display:none;">{% csrf_token %}</form>
+
+<!-- 统计 -->
+<div class="grid-2 mb-4" style="gap: 14px; grid-template-columns: 1fr 1fr;">
+  <div class="card stat-card">
+    <div class="stat-value">{{ total }}</div>
+    <div class="stat-label">已产生的练习记录</div>
+  </div>
+  <div class="card stat-card">
+    <div class="stat-value">{% if avg %}{{ avg }} 分{% else %}-{% endif %}</div>
+    <div class="stat-label">批改平均分</div>
+  </div>
+</div>
+
+<!-- 筛选 -->
+<div class="card mb-4">
+  <div class="flex gap-2" style="flex-wrap: wrap; align-items: center; row-gap: 10px;">
+    <div class="flex gap-2" style="background: var(--c-surface-2); padding: 4px; border-radius: 10px;">
+      <a href="?type={{ current_type }}&source={{ current_source }}"
+         class="btn btn-sm {% if not current_exam_type %}btn-primary{% else %}btn-secondary{% endif %}"
+         style="border:none; box-shadow:none;">全部</a>
+      <a href="?exam_type=english1&type={{ current_type }}&source={{ current_source }}"
+         class="btn btn-sm {% if current_exam_type == 'english1' %}btn-primary{% else %}btn-secondary{% endif %}"
+         style="border:none; box-shadow:none;">英语一</a>
+      <a href="?exam_type=english2&type={{ current_type }}&source={{ current_source }}"
+         class="btn btn-sm {% if current_exam_type == 'english2' %}btn-primary{% else %}btn-secondary{% endif %}"
+         style="border:none; box-shadow:none;">英语二</a>
+    </div>
+    <div class="flex gap-2" style="background: var(--c-surface-2); padding: 4px; border-radius: 10px;">
+      {% for t in type_options %}
+      <a href="?exam_type={{ current_exam_type }}&type={{ t.0 }}&source={{ current_source }}"
+         class="btn btn-sm {% if current_type == t.0 %}btn-primary{% else %}btn-secondary{% endif %}"
+         style="border:none; box-shadow:none;">{{ t.1 }}</a>
+      {% endfor %}
+    </div>
+    <div class="flex gap-2" style="background: var(--c-surface-2); padding: 4px; border-radius: 10px; margin-left: auto;">
+      <a href="?exam_type={{ current_exam_type }}&type={{ current_type }}&source="
+         class="btn btn-sm {% if not current_source %}btn-primary{% else %}btn-secondary{% endif %}"
+         style="border:none; box-shadow:none;">全部来源</a>
+      <a href="?exam_type={{ current_exam_type }}&type={{ current_type }}&source=ai"
+         class="btn btn-sm {% if current_source == 'ai' %}btn-primary{% else %}btn-secondary{% endif %}"
+         style="border:none; box-shadow:none;">AI</a>
+      <a href="?exam_type={{ current_exam_type }}&type={{ current_type }}&source=manual"
+         class="btn btn-sm {% if current_source == 'manual' %}btn-primary{% else %}btn-secondary{% endif %}"
+         style="border:none; box-shadow:none;">手动</a>
+    </div>
+  </div>
+</div>
+
+<!-- 历史列表 -->
+<div class="card">
+  {% if practices %}
+  <div class="table-wrap">
+    <table class="word-table">
+      <thead>
+        <tr><th>时间</th><th>年份</th><th>科目</th><th>题型</th><th>来源</th><th>得分</th><th>操作</th></tr>
+      </thead>
+      <tbody>
+        {% for p in practices %}
+        {% with s=p.get_score %}
+        <tr>
+          <td class="text-secondary text-sm">{{ p.created_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ p.question.year }}</td>
+          <td>{{ p.question.get_exam_type_display }}</td>
+          <td>{{ p.question.get_question_type_display }}</td>
+          <td>
+            {% if p.source == 'ai' %}<span class="badge badge-master">AI</span>
+            {% elif p.source == 'manual' %}<span class="badge badge-review">手动/批改</span>
+            {% else %}{{ p.source }}{% endif %}
+          </td>
+          <td>
+            {% if s.total %}<span class="text-accent" style="font-weight:600;">{{ s.total }} 分</span>
+            {% elif s.raw %}—{% else %}-{% endif %}
+          </td>
+          <td>
+            <a href="{% url 'words:exam_write' p.question.id %}" class="btn btn-secondary btn-xs">重练</a>
+            <button class="btn btn-secondary btn-xs" onclick="viewDetail({{ p.id }})">详情</button>
+          </td>
+        </tr>
+        <tr id="detail-{{ p.id }}" style="display:none;">
+          <td colspan="7" style="padding: 0;">
+            <div style="padding: 16px 20px; background: var(--c-surface-2);">
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div>
+                  <div class="text-secondary text-sm" style="margin-bottom:6px;">{% if p.mode == 'translation' %}我的译文{% else %}我的作答{% endif %}</div>
+                  {% if p.user_input %}
+                  <pre style="white-space:pre-wrap; margin:0; font-family:inherit; font-size:var(--fs-sm);">{{ p.user_input }}</pre>
+                  {% else %}
+                  <div class="text-secondary text-sm">（AI 代写模式，无手动输入）</div>
+                  {% endif %}
+                </div>
+                <div>
+                  <div class="text-secondary text-sm" style="margin-bottom:6px;">AI 输出 / 批改</div>
+                  <pre style="white-space:pre-wrap; margin:0; font-family:inherit; font-size:var(--fs-sm); max-height:260px; overflow:auto;">{{ p.ai_output|truncatechars:1200 }}</pre>
+                </div>
+              </div>
+              {% if s.comments %}
+              <div class="mt-3" style="margin-top:12px;">
+                <div class="text-secondary text-sm" style="margin-bottom:6px;">综合评语</div>
+                <div style="font-size:var(--fs-sm);">{{ s.comments }}</div>
+              </div>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endwith %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-state-title">暂无练习记录</div>
+    <div>去工坊开始一篇练习吧</div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function viewDetail(id) {
+  var tr = document.getElementById('detail-' + id);
+  if (tr) tr.style.display = tr.style.display === 'none' ? '' : 'none';
+}
+</script>
+{% endblock %}

@@ -17,18 +17,25 @@
   /* 动态背景：频谱可视化层 */
   #viz {
     position: fixed; inset: 0; width: 100%; height: 100%;
-    opacity: .55; pointer-events: none; z-index: 0;
+    opacity: .55; pointer-events: none; z-index: 1;
   }
 
   /* 渐变光晕背景 */
   .glow {
-    position: fixed; inset: 0; z-index: 1; pointer-events: none;
+    position: fixed; inset: 0; z-index: 2; pointer-events: none;
     background:
       radial-gradient(circle at 20% 30%, rgba(49,194,124,.28) 0%, transparent 45%),
       radial-gradient(circle at 80% 70%, rgba(124,77,255,.22) 0%, transparent 45%),
       radial-gradient(circle at 50% 50%, rgba(49,194,124,.10) 0%, transparent 60%);
     animation: breathe 8s ease-in-out infinite alternate;
   }
+  .wallpaper-layer {
+    position: fixed; inset: 0; z-index: 0;
+    background-size: cover; background-position: center; background-repeat: no-repeat;
+    transition: opacity .4s ease;
+    opacity: 0;
+  }
+  .wallpaper-layer.has-wallpaper { opacity: .55; }
   @keyframes breathe {
     from { opacity: .8; transform: scale(1); }
     to   { opacity: 1; transform: scale(1.05); }
@@ -54,18 +61,18 @@
 
   /* 玻璃主卡片 */
   .player {
-    position: relative; z-index: 2;
+    position: relative; z-index: 3;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     height: 100vh; padding: 14px 16px 12px;
   }
   .card {
     width: 100%; max-width: 420px;
-    background: rgba(255,255,255,.07);
-    border: 1px solid rgba(255,255,255,.12);
+    background: transparent;
+    border: none;
     border-radius: 24px;
-    backdrop-filter: blur(20px) saturate(1.5);
-    -webkit-backdrop-filter: blur(20px) saturate(1.5);
-    box-shadow: 0 24px 70px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.12);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
     padding: 20px 22px 18px;
     display: flex; flex-direction: column;
   }
@@ -99,11 +106,8 @@
   }
   .vinyl {
     width: 170px; height: 170px; border-radius: 50%;
-    background:
-      radial-gradient(circle at 50% 50%, #111 18%, transparent 20%),
-      repeating-radial-gradient(circle at 50% 50%, #1a1a1a 0, #1a1a1a 2px, #111 3px, #111 4px),
-      linear-gradient(135deg, #31c27c, #7c4dff);
-    box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 0 4px rgba(255,255,255,.06);
+    background: transparent;
+    box-shadow: none;
     animation: spin 8s linear infinite;
     animation-play-state: paused;
     position: relative;
@@ -112,7 +116,7 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .vinyl::after {
     content: ''; position: absolute; inset: 0; border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, rgba(255,255,255,.12), transparent 40%);
+    background: radial-gradient(circle at 35% 35%, rgba(255,255,255,.08), transparent 40%);
   }
   .cover-label {
     position: absolute; inset: 0; margin: auto;
@@ -292,6 +296,7 @@
 <body>
 <canvas id="viz"></canvas>
 <div class="glow"></div>
+<div class="wallpaper-layer" id="wallpaperLayer"></div>
 
 <div class="mv-layer" id="mvLayer">
   <video id="mvVideo" preload="metadata" playsinline></video>
@@ -321,6 +326,15 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
           <span>列表</span>
         </button>
+        <button class="list-toggle" onclick="document.getElementById('wallpaperInput').click()" title="更换壁纸">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+          <span>壁纸</span>
+        </button>
+        <button class="list-toggle" id="clearWallpaperBtn" onclick="clearWallpaper()" title="恢复默认背景" style="display:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+          <span>默认</span>
+        </button>
+        <input type="file" id="wallpaperInput" accept="image/*" style="display:none;" onchange="changeWallpaper(this)">
       </div>
       <span class="top-state" id="playState">–</span>
     </div>
@@ -693,6 +707,51 @@
     try { localStorage.setItem('vocab-music-vol', String(lastVol)); } catch (e) {}
   });
 
+  // ===== 壁纸 =====
+  function applyWallpaper() {
+    var layer = document.getElementById('wallpaperLayer');
+    var clearBtn = document.getElementById('clearWallpaperBtn');
+    var url = null;
+    try { url = localStorage.getItem('vocab-music-wallpaper'); } catch (e) {}
+    if (url) {
+      layer.style.backgroundImage = 'url(' + url + ')';
+      layer.classList.add('has-wallpaper');
+      if (clearBtn) clearBtn.style.display = 'inline-flex';
+    } else {
+      layer.style.backgroundImage = '';
+      layer.classList.remove('has-wallpaper');
+      if (clearBtn) clearBtn.style.display = 'none';
+    }
+  }
+  function changeWallpaper(input) {
+    var file = input.files ? input.files[0] : null;
+    input.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      flashStatus('请选择图片文件');
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        localStorage.setItem('vocab-music-wallpaper', e.target.result);
+        applyWallpaper();
+        flashStatus('壁纸已更换');
+      } catch (err) {
+        flashStatus('图片过大，请换一张较小的图片');
+      }
+    };
+    reader.onerror = function () {
+      flashStatus('读取图片失败');
+    };
+    reader.readAsDataURL(file);
+  }
+  function clearWallpaper() {
+    try { localStorage.removeItem('vocab-music-wallpaper'); } catch (e) {}
+    applyWallpaper();
+    flashStatus('已恢复默认背景');
+  }
+
   // ===== 播放事件 =====
   audio.addEventListener('play', function () {
     setPlayState(true);
@@ -717,11 +776,13 @@
   });
   audio.addEventListener('timeupdate', function () {
     if (mvMode && SONGS[idx] && SONGS[idx].video_url) return;
-    document.getElementById('curTime').textContent = fmt(audio.currentTime);
-    if (audio.duration && isFinite(audio.duration)) {
-      document.getElementById('seekBar').max = audio.duration;
-      document.getElementById('seekBar').value = audio.currentTime;
-      document.getElementById('totalTime').textContent = fmt(audio.duration);
+    if (!isSeeking) {
+      document.getElementById('curTime').textContent = fmt(audio.currentTime);
+      if (audio.duration && isFinite(audio.duration)) {
+        document.getElementById('seekBar').max = audio.duration;
+        document.getElementById('seekBar').value = audio.currentTime;
+        document.getElementById('totalTime').textContent = fmt(audio.duration);
+      }
     }
     if (Math.floor(audio.currentTime) % 5 === 0 && SONGS[idx]) {
       try {
@@ -739,7 +800,14 @@
       document.getElementById('seekBar').max = audio.duration;
     }
   });
-  document.getElementById('seekBar').addEventListener('input', function () {
+  var isSeeking = false;
+  var seekBar = document.getElementById('seekBar');
+  seekBar.addEventListener('mousedown', function () { isSeeking = true; });
+  seekBar.addEventListener('touchstart', function () { isSeeking = true; });
+  seekBar.addEventListener('mouseup', function () { isSeeking = false; });
+  seekBar.addEventListener('touchend', function () { isSeeking = false; });
+  seekBar.addEventListener('change', function () { isSeeking = false; });
+  seekBar.addEventListener('input', function () {
     var t = parseFloat(this.value);
     if (mvMode && SONGS[idx] && SONGS[idx].video_url) {
       mvVideo.currentTime = t;
@@ -765,11 +833,13 @@
   });
   mvVideo.addEventListener('timeupdate', function () {
     if (!mvMode) return;
-    document.getElementById('curTime').textContent = fmt(mvVideo.currentTime);
-    if (mvVideo.duration && isFinite(mvVideo.duration)) {
-      document.getElementById('seekBar').max = mvVideo.duration;
-      document.getElementById('seekBar').value = mvVideo.currentTime;
-      document.getElementById('totalTime').textContent = fmt(mvVideo.duration);
+    if (!isSeeking) {
+      document.getElementById('curTime').textContent = fmt(mvVideo.currentTime);
+      if (mvVideo.duration && isFinite(mvVideo.duration)) {
+        document.getElementById('seekBar').max = mvVideo.duration;
+        document.getElementById('seekBar').value = mvVideo.currentTime;
+        document.getElementById('totalTime').textContent = fmt(mvVideo.duration);
+      }
     }
     if (Math.floor(mvVideo.currentTime) % 5 === 0 && SONGS[idx]) {
       try {
@@ -814,6 +884,7 @@
   // ===== 初始化 =====
   renderMode();
   applyVol();
+  applyWallpaper();
   renderPlaylist();
   if (SONGS.length) {
     if (currentId) {

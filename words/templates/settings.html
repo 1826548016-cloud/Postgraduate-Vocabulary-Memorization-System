@@ -49,8 +49,24 @@
       <option value="sepia" {% if settings.theme == 'sepia' %}selected{% endif %}>📜 复古牛皮</option>
       <option value="dark" {% if settings.theme == 'dark' %}selected{% endif %}>🌙 深夜书桌</option>
       <option value="nightblue" {% if settings.theme == 'nightblue' %}selected{% endif %}>✨ 星空午夜</option>
+      <option value="custom" {% if settings.theme == 'custom' %}selected{% endif %}>🖼 自定义壁纸</option>
     </select>
     <div class="form-help">点右上角图标可循环切换，这里可精确选择并保存到账号</div>
+  </div>
+
+  <div class="form-group" style="margin-top: 16px; display: none;" id="wallpaperGroup">
+    <label class="form-label">壁纸</label>
+    <div class="flex gap-2" style="flex-wrap: wrap;">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('wallpaperInput').click()">
+        <i class="ph ph-upload"></i> 上传壁纸
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm" id="clearWallpaperBtn" onclick="clearThemeWallpaper()" style="display:none;">
+        <i class="ph ph-arrow-counter-clockwise"></i> 恢复默认
+      </button>
+      <input type="file" id="wallpaperInput" accept="image/*" style="display:none;" onchange="onWallpaperChange(this)">
+    </div>
+    <div id="wallpaperList" class="wallpaper-list" style="margin-top: 12px;"></div>
+    <div class="form-help">壁纸保存在本机浏览器，可上传多张并点击切换，选择「自定义壁纸」主题后生效</div>
   </div>
 </div>
 
@@ -191,6 +207,15 @@
           <option value="">自动（使用第一个启用的模型）</option>
         </select>
       </div>
+      <div class="flex justify-between items-center" style="flex-wrap: wrap; gap: 10px;">
+        <div>
+          <div style="font-weight: 500;"><i class="ph ph-pen-nib" style="color: var(--c-red);"></i> 考研写作工坊模型</div>
+          <div class="text-sm text-secondary">写作工坊「AI 代写 / AI 批改 / 翻译拆解 / 命题规律分析」使用的模型，切换后立即生效</div>
+        </div>
+        <select id="examModelSelect" class="form-input" style="min-width: 240px;" onchange="saveFeatureModel('exam_model', this.value)">
+          <option value="">自动（使用第一个启用的模型）</option>
+        </select>
+      </div>
     </div>
   </div>
 
@@ -260,6 +285,7 @@
     <p>技术栈：Django + Chart.js + Browser TTS</p>
     <p>最后更新于：2026年8月10日</p>
     <p>声明：仅用于学习和研究，不涉及任何商业用途。</p>
+    <p>如果token不够的话可以访问https://www.codex2api.com/register?aff=VBXRX8FRRMCR进行购买调用</p>
   </div>
 </div>
 
@@ -280,6 +306,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var cur = document.documentElement.getAttribute('data-theme');
     if (cur && themeSel.querySelector('option[value="' + cur + '"]')) themeSel.value = cur;
   }
+  toggleWallpaperGroup();
 });
 
 // ===== Font Size =====
@@ -313,10 +340,77 @@ function applyFontSize() {
 }
 
 // ===== Theme =====
+function refreshClearBtn() {
+  var clearBtn = document.getElementById('clearWallpaperBtn');
+  if (!clearBtn) return;
+  WallpaperDB.getList().then(function (list) {
+    clearBtn.style.display = list.length ? 'inline-flex' : 'none';
+  }).catch(function () { clearBtn.style.display = 'none'; });
+}
+
+// 渲染已上传壁纸缩略图列表（点击切换，可删除）
+function renderWallpaperList() {
+  var wrap = document.getElementById('wallpaperList');
+  if (!wrap) return;
+  WallpaperDB.getList().then(function (list) {
+    var curId = null;
+    try { curId = localStorage.getItem('vocab-theme-wallpaper-id') || null; } catch (e) {}
+    wrap.innerHTML = '';
+    if (!list.length) return;
+    list.forEach(function (it) {
+      var item = document.createElement('div');
+      item.className = 'wallpaper-item' + (it.id === curId ? ' active' : '');
+      item.title = '点击切换壁纸';
+      var thumb = document.createElement('div');
+      thumb.className = 'wallpaper-thumb';
+      thumb.style.backgroundImage = 'url(' + URL.createObjectURL(it.blob) + ')';
+      thumb.onclick = function () { selectThemeWallpaper(it.id); };
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'wallpaper-del';
+      del.title = '删除此壁纸';
+      del.innerHTML = '&times;';
+      del.onclick = function (e) {
+        e.stopPropagation();
+        deleteThemeWallpaper(it.id);
+      };
+      item.appendChild(thumb);
+      item.appendChild(del);
+      wrap.appendChild(item);
+    });
+  }).catch(function () {});
+}
+
+function toggleWallpaperGroup() {
+  var cur = document.documentElement.getAttribute('data-theme');
+  var group = document.getElementById('wallpaperGroup');
+  if (!group) return;
+  group.style.display = (cur === 'custom') ? 'block' : 'none';
+  refreshClearBtn();
+  renderWallpaperList();
+}
+
+function onWallpaperChange(input) {
+  var file = input.files ? input.files[0] : null;
+  input.value = '';
+  if (!file) return;
+  uploadThemeWallpaper(file, function (ok) {
+    if (ok) toggleWallpaperGroup();
+  });
+}
+
+// 壁纸新增/切换/删除后刷新列表显示
+window.addEventListener('vocab-wallpaper-change', function () {
+  refreshClearBtn();
+  renderWallpaperList();
+});
+
 function changeTheme(theme) {
   if (!theme) return;
   document.documentElement.setAttribute('data-theme', theme);
   localStorage.setItem('vocab-theme', theme);
+  applyThemeWallpaper();
+  toggleWallpaperGroup();
   VOCAB_API.post('/api/settings/', { theme: theme }).then(function (res) {
     if (res.success) showToast('主题已切换', 'success');
     else showToast(res.error || '保存失败', 'error');
@@ -510,6 +604,7 @@ function loadFeatureModels() {
     fillModelSelect('reviewModelSelect', res.review_model_id);
     fillModelSelect('quickMemoryModelSelect', res.quick_memory_model_id);
     fillModelSelect('meaningCheckModelSelect', res.meaning_check_model_id);
+    fillModelSelect('examModelSelect', res.exam_model_id);
   }).catch(function () {});
 }
 

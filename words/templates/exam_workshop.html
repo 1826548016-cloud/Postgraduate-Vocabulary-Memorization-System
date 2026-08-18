@@ -1,0 +1,214 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}考研写作工坊 - 考研单词背诵系统{% endblock %}
+
+{% block page_title %}写作工坊{% endblock %}
+
+{% block content %}
+<form style="display:none;">{% csrf_token %}</form>
+
+<!-- 数据统计卡片 -->
+<div class="card-grid mb-4" style="grid-template-columns: repeat(4, 1fr); gap: 14px;">
+  <div class="stat-card">
+    <div class="stat-card-head">
+      <span class="stat-icon stat-icon--red"><i class="ph ph-note-pencil"></i></span>
+      <span class="card-header" style="margin:0;">真题总量</span>
+    </div>
+    <div class="stat-value">{{ stats.total }}</div>
+    <div class="stat-label">历年全套真题</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-head">
+      <span class="stat-icon stat-icon--blue"><i class="ph ph-books"></i></span>
+      <span class="card-header" style="margin:0;">作文</span>
+    </div>
+    <div class="stat-value">{{ stats.essays }}</div>
+    <div class="stat-label">小作文 · 大作文</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-head">
+      <span class="stat-icon stat-icon--green"><i class="ph ph-translate"></i></span>
+      <span class="card-header" style="margin:0;">翻译</span>
+    </div>
+    <div class="stat-value">{{ stats.translations }}</div>
+    <div class="stat-label">英一长难句 · 英二段落</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-head">
+      <span class="stat-icon stat-icon--amber"><i class="ph ph-bookmark-simple"></i></span>
+      <span class="card-header" style="margin:0;">沉淀</span>
+    </div>
+    <div class="stat-value">{{ stats.phrases }}</div>
+    <div class="stat-label">好句 · 错题</div>
+  </div>
+</div>
+
+<!-- 写作引导区：两个并排大卡 -->
+<div class="grid-2 mb-4" style="gap: 16px;">
+  <!-- 作文 -->
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <div class="card-header" style="display:flex; align-items:center; gap:10px; padding: 16px 22px; margin:0; border-bottom:1px solid var(--c-border-light); background: var(--c-surface-2);">
+      <i class="ph ph-quill" style="color: var(--c-red); font-size:1.3rem;"></i> 作文练习
+    </div>
+    <div class="p-3" style="padding: 18px 22px; display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+      {% for card in essay_cards %}
+      <a href="{{ card.url }}" class="study-tile">
+        <div class="study-tile-icon study-tile-icon--{{ card.tone }}"><i class="ph {{ card.icon }}"></i></div>
+        <div class="study-tile-title">{{ card.title }}</div>
+        <div class="study-tile-desc">{{ card.desc }}</div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- 翻译 -->
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <div class="card-header" style="display:flex; align-items:center; gap:10px; padding: 16px 22px; margin:0; border-bottom:1px solid var(--c-border-light); background: var(--c-surface-2);">
+      <i class="ph ph-translate" style="color: var(--c-blue); font-size:1.3rem;"></i> 翻译专项
+    </div>
+    <div class="p-3" style="padding: 18px 22px; display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+      {% for card in trans_cards %}
+      <a href="{{ card.url }}" class="study-tile">
+        <div class="study-tile-icon study-tile-icon--{{ card.tone }}"><i class="ph {{ card.icon }}"></i></div>
+        <div class="study-tile-title">{{ card.title }}</div>
+        <div class="study-tile-desc">{{ card.desc }}</div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- AI 规律分析 + 最近练习 -->
+<div class="grid-2 mb-4" style="grid-template-columns: 1fr 1.4fr; gap: 16px;">
+  <!-- AI 面板 -->
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <div class="card-header" style="display:flex; align-items:center; gap:10px; padding: 16px 22px; margin:0; border-bottom:1px solid var(--c-border-light);">
+      <i class="ph ph-lightbulb" style="color: var(--c-amber); font-size:1.3rem;"></i> AI 命题规律分析
+    </div>
+    <div style="padding: 18px 22px;">
+      <p class="text-secondary" style="font-size: var(--fs-sm); margin-bottom: 14px; line-height:1.7;">基于历年真题，AI 自动归纳高频主题、常考题型与写作要点，助你把握命题方向。</p>
+      <div class="flex gap-2" style="flex-wrap: wrap;">
+        <button class="btn btn-secondary btn-sm" onclick="genThemesReport('english1')"><i class="ph ph-magnifying-glass"></i> 英语一</button>
+        <button class="btn btn-secondary btn-sm" onclick="genThemesReport('english2')"><i class="ph ph-magnifying-glass"></i> 英语二</button>
+      </div>
+      <div id="themesReportWrap" class="mt-3" style="display:none;">
+        <div class="report-loading text-secondary text-sm">AI 正在分析历年真题规律，请稍候…</div>
+        <div id="themesReport" class="markdown-body" style="margin-top: 12px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 最近练习 -->
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <div class="card-header" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding: 16px 22px; margin:0; border-bottom:1px solid var(--c-border-light);">
+      <span style="display:flex; align-items:center; gap:10px;"><i class="ph ph-clock" style="color: var(--c-green); font-size:1.3rem;"></i> 最近练习</span>
+      <span class="flex gap-2">
+        <a href="{% url 'words:exam_history' %}" class="btn btn-secondary btn-xs">练习历史</a>
+        <a href="{% url 'words:exam_logs' %}" class="btn btn-secondary btn-xs">AI 日志</a>
+        <a href="{% url 'words:exam_phrases' %}" class="btn btn-secondary btn-xs">好句 / 错题本</a>
+      </span>
+    </div>
+    <div style="padding: 12px 12px;">
+      {% if recent_practices %}
+      <div class="table-wrap" style="width:100%;">
+        <table class="word-table">
+          <tbody>
+            {% for p in recent_practices %}
+            <tr style="border-bottom:1px solid var(--c-border-light);">
+              <td><span class="date-chip">{{ p.question.year }}</span></td>
+              <td>{{ p.question.get_exam_type_display|slice:":2" }}</td>
+              <td>{{ p.question.get_question_type_display }}</td>
+              <td>{{ p.get_mode_display }}{% if p.source == 'ai' %}<span class="text-secondary text-xs">（AI）</span>{% endif %}</td>
+              <td>
+                {% with s=p.get_score %}
+                  {% if s.total %}<span class="text-accent">{{ s.total }} 分</span>{% else %}-{% endif %}
+                {% endwith %}
+              </td>
+              <td class="text-secondary text-xs">{{ p.created_at|date:"m-d" }}</td>
+              <td><a href="{% url 'words:exam_write' p.question.id %}" class="btn btn-secondary btn-xs">续写</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="empty-state-title">还没有练习记录</div>
+        <div>从上方入口选一篇真题开始吧</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function genThemesReport(examType) {
+  var wrap = document.getElementById('themesReportWrap');
+  var box = document.getElementById('themesReport');
+  wrap.style.display = 'block';
+  box.innerHTML = '';
+  showToast('AI 分析中，请稍候…', 'success');
+  VOCAB_API.post('{% url "words:api_exam_themes_report" %}', { exam_type: examType }).then(function (res) {
+    if (res.success) {
+      box.innerHTML = renderMarkdown(res.content);
+      showToast('命题规律分析已完成', 'success');
+    } else {
+      box.innerHTML = '<div class="empty-state">' + (res.error || '分析失败') + '</div>';
+      showToast(res.error || '分析失败', 'error');
+    }
+  }).catch(function (e) {
+    box.innerHTML = '<div class="empty-state">请求失败，请检查网络</div>';
+    showToast('请求失败', 'error');
+  });
+}
+
+function escapeHtml(src) {
+  return String(src || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function renderMarkdown(src) {
+  if (!src) return '';
+  var lines = escapeHtml(src).split('\n');
+  var html = '', i = 0, para = [];
+  function flushPara() { if (para.length) { html += '<p>' + para.map(inline).join('\n') + '</p>'; para = []; } }
+  function inline(s) {
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (m, t, u) { return /^(https?:\/\/)/.test(u) ? '<a href="' + u + '" target="_blank" rel="noopener">' + t + '</a>' : m; });
+    s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    return s;
+  }
+  while (i < lines.length) {
+    var line = lines[i];
+    if (/^\s*```/.test(line)) {
+      flushPara(); var buf = []; i++;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i++; }
+      html += '<pre><code>' + buf.join('\n') + '</code></pre>'; i++; continue;
+    }
+    var h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) { flushPara(); html += '<h' + h[1].length + '>' + inline(h[2]) + '</h' + h[1].length + '>'; i++; continue; }
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { flushPara(); html += '<hr>'; i++; continue; }
+    if (/^\s*>\s?/.test(line)) {
+      flushPara(); var q = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) { q.push(inline(lines[i].replace(/^\s*>\s?/, ''))); i++; }
+      html += '<blockquote>' + q.join('<br>') + '</blockquote>'; continue;
+    }
+    if (/^\s*[-*+]\s+/.test(line)) {
+      flushPara(); var ul = [];
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { ul.push('<li>' + inline(lines[i].replace(/^\s*[-*+]\s+/, '')) + '</li>'); i++; }
+      html += '<ul>' + ul.join('') + '</ul>'; continue;
+    }
+    if (/^\s*\d+[.)]\s+/.test(line)) {
+      flushPara(); var ol = [];
+      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) { ol.push('<li>' + inline(lines[i].replace(/^\s*\d+[.)]\s+/, '')) + '</li>'); i++; }
+      html += '<ol>' + ol.join('') + '</ol>'; continue;
+    }
+    para.push(line); i++;
+  }
+  flushPara();
+  return html;
+}
+</script>
+{% endblock %}

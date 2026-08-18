@@ -1,0 +1,380 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ question.title }} - 考研写作工坊{% endblock %}
+
+{% block page_title %}真题练习{% endblock %}
+
+{% block content %}
+<form style="display:none;">{% csrf_token %}</form>
+
+<!-- 题目信息 -->
+<div class="card mb-4">
+  <div class="flex justify-between items-center mb-2" style="flex-wrap: wrap; gap: 8px;">
+    <div class="flex gap-2" style="flex-wrap: wrap;">
+      <span class="btn btn-xs btn-secondary">{{ question.get_exam_type_display }}</span>
+      <span class="btn btn-xs btn-secondary">{{ question.year }} 年</span>
+      <span class="btn btn-xs btn-secondary">{{ question.get_question_type_display }}</span>
+      {% if question.genre %}<span class="btn btn-xs btn-secondary">{{ question.genre }}</span>{% endif %}
+    </div>
+    <a href="{% url 'words:exam_questions' %}?exam_type={{ question.exam_type }}&type={{ question.question_type }}" class="btn btn-secondary btn-sm"><i class="ph ph-arrow-left"></i> 返回列表</a>
+  </div>
+  <div class="word-text" style="font-size:1.15rem; margin-bottom: 8px;">{{ question.title }}</div>
+  <div class="text-secondary" style="white-space: pre-line;">{{ question.content }}</div>
+  {% if question.prompt %}<div class="mt-2 text-secondary text-sm" style="white-space: pre-line;">要求：{{ question.prompt }}</div>{% endif %}
+  {% if question.tags %}
+  <div class="flex gap-2 mt-2">{% for t in question.tags %}<span class="date-chip">{{ t }}</span>{% endfor %}</div>
+  {% endif %}
+</div>
+
+{% if question.question_type == 'translation' %}
+<!-- ===== 翻译练习模式 ===== -->
+<div style="display:flex; gap:16px; flex-wrap: wrap;">
+  <div style="flex:1 1 340px; min-width: 280px;">
+    <div class="card mb-4">
+      <div class="card-header">翻译练习</div>
+      <div class="form-group">
+        <label class="form-label">原文（可从题目中复制难句）</label>
+        <textarea id="translatText" class="form-input" rows="6" placeholder="粘贴要翻译的英文句子…"></textarea>
+      </div>
+      <div class="flex gap-2" style="flex-wrap: wrap;">
+        <button type="button" class="btn btn-primary" onclick="analyzeSentence()"><i class="ph ph-magnifying-glass"></i> AI 拆解分析</button>
+        <button type="button" class="btn btn-secondary" onclick="gradeTranslation()"><i class="ph ph-check-square"></i> 批改我的译文</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">我的译文</div>
+      <textarea id="myTranslation" class="form-input" rows="4" placeholder="写下你的翻译…"></textarea>
+    </div>
+  </div>
+  <div style="flex:1.3 1 420px; min-width: 300px;">
+    <div class="card mb-4">
+      <div class="card-header flex justify-between items-center">
+        <span>AI 拆解分析</span>
+        <i class="ph ph-sparkle text-accent"></i>
+      </div>
+      <div id="analyzeResult" class="markdown-body text-secondary" style="min-height:80px;">
+        <div class="empty-state"><div class="empty-state-title">等待分析</div><div>粘贴句子后点击「AI 拆解分析」，将得到语法结构拆解、词汇点拨和参考译文</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header flex justify-between items-center">
+        <span>批改结果</span>
+        <i class="ph ph-sparkle text-accent"></i>
+      </div>
+      <div id="translationGradeResult" style="min-height:60px;">
+        <div class="empty-state"><div class="empty-state-title">还没有批改</div><div>写完译文后点击「批改我的译文」</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function getTextarea() { return document.getElementById('translatText'); }
+
+function analyzeSentence() {
+  var sent = getTextarea().value.trim();
+  if (!sent) { showToast('请先输入要分析的句子', 'error'); return; }
+  var box = document.getElementById('analyzeResult');
+  box.innerHTML = '<div class="report-loading">AI 拆解中，请稍候…</div>';
+  VOCAB_API.post('{% url "words:api_exam_translate_analyze" %}', { question_id: {{ question.id }}, sentence: sent }).then(function (res) {
+    if (res.success) {
+      box.innerHTML = renderMarkdown(res.content);
+    } else {
+      box.innerHTML = '<div class="empty-state">' + (res.error || '分析失败') + '</div>';
+      showToast(res.error || '分析失败', 'error');
+    }
+  }).catch(function () {
+    box.innerHTML = '<div class="empty-state">请求失败，请检查网络或 AI 配置</div>';
+    showToast('请求失败', 'error');
+  });
+}
+
+function gradeTranslation() {
+  var trans = document.getElementById('myTranslation').value.trim();
+  if (!trans) { showToast('请先输入你的译文', 'error'); return; }
+  var box = document.getElementById('translationGradeResult');
+  box.innerHTML = '<div class="report-loading">AI 批改中，请稍候…</div>';
+  VOCAB_API.post('{% url "words:api_exam_grade_translation" %}', { question_id: {{ question.id }}, translation: trans }).then(function (res) {
+    if (res.success) {
+      box.innerHTML = renderGradeResult(res.result);
+      showToast('批改完成', 'success');
+    } else {
+      box.innerHTML = '<div class="empty-state">' + (res.error || '批改失败') + '</div>';
+      showToast(res.error || '批改失败', 'error');
+    }
+  }).catch(function () {
+    box.innerHTML = '<div class="empty-state">请求失败，请检查网络或 AI 配置</div>';
+    showToast('请求失败', 'error');
+  });
+}
+
+function renderGradeResult(r) {
+  if (!r || r.raw) return '<div class="markdown-body">' + renderMarkdown(r.raw || '—') + '</div>';
+  var html = '';
+  var scores = r.scores || {};
+  var dims = [
+    ['accuracy', '忠实度'], ['fluency', '通顺度'], ['completeness', '完整度']
+  ];
+  html += '<div class="grid-3" style="margin-bottom: 12px;">';
+  dims.forEach(function (d) {
+    var v = scores[d[0]] || 0;
+    html += '<div class="card" style="padding:10px; text-align:center;">'
+      + '<div class="stat-value text-accent">' + v + '</div>'
+      + '<div class="text-secondary text-sm">' + d[1] + '</div></div>';
+  });
+  html += '</div>';
+  if (r.total) html += '<div class="mb-2"><strong>总分：' + r.total + ' / 30</strong></div>';
+  if (r.comments) html += '<div class="mb-2">' + renderMarkdown('**总评：**' + r.comments) + '</div>';
+  if (r.errors && r.errors.length) {
+    html += '<div class="mb-2"><strong>错误修正：</strong></div><ul class="mb-2">';
+    r.errors.forEach(function (e) {
+      html += '<li><span style="text-decoration:line-through;">' + escapeHtml(e.original || '') + '</span> → '
+        + '<span class="text-accent">' + escapeHtml(e.corrected || '') + '</span>'
+        + (e.reason ? ' <span class="text-secondary text-sm">(' + escapeHtml(e.reason) + ')</span>' : '') + '</li>';
+    });
+    html += '</ul>';
+  }
+  if (r.suggestions && r.suggestions.length) {
+    html += '<div class="mb-2"><strong>改进建议：</strong></div><ul class="mb-2">';
+    r.suggestions.forEach(function (s) { html += '<li>' + escapeHtml(s) + '</li>'; });
+    html += '</ul>';
+  }
+  if (r.model_translation) {
+    html += '<div class="mb-2"><strong>参考译文：</strong></div><div class="model-box">' + renderMarkdown(r.model_translation) + '</div>';
+  }
+  return html;
+}
+</script>
+
+{% else %}
+<!-- ===== 作文练习模式 ===== -->
+<div class="grid-2">
+  <!-- 左：AI 代写 -->
+  <div class="card mb-4">
+    <div class="card-header flex justify-between items-center">
+      <span><i class="ph ph-magic-wand"></i> AI 代写</span>
+      <span class="text-secondary text-sm">根据你的词汇量生成</span>
+    </div>
+    <div class="form-group">
+      <label class="form-label">风格</label>
+      <div class="flex gap-2" style="flex-wrap: wrap;">
+        <button type="button" class="btn btn-sm btn-secondary style-btn" data-style="easy">基础版（简单词汇）</button>
+        <button type="button" class="btn btn-sm btn-primary style-btn" data-style="standard">标准版（贴合你的词汇量）</button>
+        <button type="button" class="btn btn-sm btn-secondary style-btn" data-style="advanced">拔高版（考研高分表达）</button>
+      </div>
+    </div>
+    <button type="button" class="btn btn-primary" id="genEssayBtn" onclick="generateEssay()"><i class="ph ph-sparkle"></i> 生成范文</button>
+    <div id="aiEssayWrap" style="margin-top: 14px; display:none;">
+      <div class="flex justify-between items-center mb-2">
+        <label class="form-label" style="margin:0;">AI 范文</label>
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-secondary btn-xs" onclick="copyText(aiEssayText)">复制</button>
+        </div>
+      </div>
+      <div class="model-box" id="aiEssayText" style="white-space: pre-wrap;"> </div>
+      <div class="form-help mt-2">标有【】的为可学习的新表达</div>
+    </div>
+  </div>
+
+  <!-- 右：手动写作 + 批改 -->
+  <div>
+    <div class="card mb-4">
+      <div class="card-header flex justify-between items-center">
+        <span><i class="ph ph-pen-nib"></i> 我的写作</span>
+        <span class="text-secondary text-sm">{% if question.question_type == 'small_essay' %}约 100 词{% else %}约 160-200 词{% endif %}</span>
+      </div>
+      <textarea id="myEssay" class="form-input" rows="14" placeholder="在这里写你的作文…（可参考左侧 AI 范文或直接手写）"></textarea>
+      <div class="flex justify-between items-center mt-2">
+        <span class="text-secondary text-sm" id="wordCount">0 词</span>
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="copyText(myEssay.value)">复制</button>
+          <button type="button" class="btn btn-primary" onclick="gradeEssay()"><i class="ph ph-check-square"></i> AI 批改</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header flex justify-between items-center">
+        <span><i class="ph ph-chart-line"></i> 批改结果</span>
+        <i class="ph ph-sparkle text-accent"></i>
+      </div>
+      <div id="essayGradeResult">
+        <div class="empty-state"><div class="empty-state-title">还没有批改</div><div>写完作文后点击「AI 批改」</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var selectedStyle = 'standard';
+document.querySelectorAll('.style-btn').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    document.querySelectorAll('.style-btn').forEach(function (b) { b.classList.remove('btn-primary'); b.classList.add('btn-secondary'); });
+    btn.classList.remove('btn-secondary'); btn.classList.add('btn-primary');
+    selectedStyle = btn.getAttribute('data-style');
+  });
+});
+
+function generateEssay() {
+  var btn = document.getElementById('genEssayBtn');
+  var wrap = document.getElementById('aiEssayWrap');
+  var box = document.getElementById('aiEssayText');
+  btn.disabled = true;
+  wrap.style.display = 'block';
+  box.textContent = 'AI 正在根据你的词汇量生成范文，请稍候…';
+  VOCAB_API.post('{% url "words:api_exam_generate_essay" %}', {
+    question_id: {{ question.id }},
+    style: selectedStyle
+  }).then(function (res) {
+    if (res.success) {
+      box.textContent = res.content;
+      showToast('范文已生成', 'success');
+    } else {
+      box.textContent = res.error || '生成失败';
+      showToast(res.error || '生成失败', 'error');
+    }
+  }).catch(function () {
+    box.textContent = '请求失败，请检查网络或 AI 配置';
+    showToast('请求失败', 'error');
+  }).finally(function () { btn.disabled = false; });
+}
+
+function gradeEssay() {
+  var essay = document.getElementById('myEssay').value.trim();
+  if (!essay) { showToast('请先写作文', 'error'); return; }
+  var box = document.getElementById('essayGradeResult');
+  box.innerHTML = '<div class="report-loading">AI 批改中，请稍候…</div>';
+  VOCAB_API.post('{% url "words:api_exam_grade" %}', {
+    question_id: {{ question.id }},
+    essay: essay
+  }).then(function (res) {
+    if (res.success) {
+      box.innerHTML = renderEssayGrade(res.result);
+      showToast('批改完成，已沉淀好句与错题', 'success');
+    } else {
+      box.innerHTML = '<div class="empty-state">' + (res.error || '批改失败') + '</div>';
+      showToast(res.error || '批改失败', 'error');
+    }
+  }).catch(function () {
+    box.innerHTML = '<div class="empty-state">请求失败，请检查网络或 AI 配置</div>';
+    showToast('请求失败', 'error');
+  });
+}
+
+function renderEssayGrade(r) {
+  if (!r || r.raw) return '<div class="markdown-body">' + renderMarkdown(r.raw || '—') + '</div>';
+  var html = '';
+  var scores = r.scores || {};
+  var dims = [
+    ['vocabulary', '词汇'], ['grammar', '语法'], ['coherence', '连贯'],
+    ['relevance', '切题'], ['richness', '丰富度']
+  ];
+  html += '<div class="grid-3" style="margin-bottom: 12px;">';
+  dims.forEach(function (d) {
+    var v = scores[d[0]] || 0;
+    html += '<div class="card" style="padding:10px; text-align:center;">'
+      + '<div class="stat-value text-accent">' + v + '</div>'
+      + '<div class="text-secondary text-sm">' + d[1] + '</div></div>';
+  });
+  html += '</div>';
+  if (r.total) html += '<div class="mb-2"><strong>总分：' + r.total + ' / 50</strong></div>';
+  if (r.comments) html += '<div class="mb-2">' + renderMarkdown('**总评：**' + r.comments) + '</div>';
+
+  if (r.errors && r.errors.length) {
+    html += '<div class="mb-2"><strong>错误修正：</strong></div><ul class="mb-2 error-list">';
+    r.errors.forEach(function (e) {
+      html += '<li style="margin-bottom:6px;"><span style="text-decoration:line-through;">' + escapeHtml(e.original || '') + '</span> → '
+        + '<span class="text-accent">' + escapeHtml(e.corrected || '') + '</span>'
+        + (e.reason ? ' <span class="text-secondary text-sm">(' + escapeHtml(e.reason) + ')</span>' : '') + '</li>';
+    });
+    html += '</ul>';
+  }
+  if (r.advanced_expressions && r.advanced_expressions.length) {
+    html += '<div class="mb-2"><strong>高级替换表达：</strong></div><ul class="mb-2">';
+    r.advanced_expressions.forEach(function (e) {
+      html += '<li style="margin-bottom:6px;"><span class="text-accent">' + escapeHtml(e.advanced || '') + '</span>'
+        + ' <span class="text-secondary text-sm">(替换 ' + escapeHtml(e.original || '') + ')</span>'
+        + (e.explain ? '<div class="text-secondary text-sm">' + escapeHtml(e.explain) + '</div>' : '') + '</li>';
+    });
+    html += '</ul>';
+  }
+  if (r.suggestions && r.suggestions.length) {
+    html += '<div class="mb-2"><strong>改进建议：</strong></div><ul class="mb-2">';
+    r.suggestions.forEach(function (s) { html += '<li>' + escapeHtml(s) + '</li>'; });
+    html += '</ul>';
+  }
+  if (r.model_essay) {
+    html += '<div class="mb-2"><strong>修改后的范文：</strong></div><div class="model-box" style="white-space: pre-wrap;">' + escapeHtml(r.model_essay) + '</div>';
+  }
+  return html;
+}
+
+// 词数统计
+document.getElementById('myEssay').addEventListener('input', function () {
+  var t = this.value.trim();
+  var words = t ? t.split(/\s+/).filter(Boolean).length : 0;
+  document.getElementById('wordCount').textContent = words + ' 词';
+});
+</script>
+{% endif %}
+
+<script>
+function copyText(text) {
+  if (!text) { showToast('暂无内容可复制', 'error'); return; }
+  navigator.clipboard.writeText(text).then(function () {
+    showToast('已复制', 'success');
+  }).catch(function () {
+    var ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); ta.remove();
+    showToast('已复制', 'success');
+  });
+}
+
+function escapeHtml(src) {
+  return String(src || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function renderMarkdown(src) {
+  if (!src) return '';
+  var lines = escapeHtml(src).split('\n');
+  var html = '', i = 0, para = [];
+  function flushPara() { if (para.length) { html += '<p>' + para.map(inline).join('\n') + '</p>'; para = []; } }
+  function inline(s) {
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (m, t, u) { return /^(https?:\/\/)/.test(u) ? '<a href="' + u + '" target="_blank" rel="noopener">' + t + '</a>' : m; });
+    s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    return s;
+  }
+  while (i < lines.length) {
+    var line = lines[i];
+    if (/^\s*```/.test(line)) {
+      flushPara(); var buf = []; i++;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i++; }
+      html += '<pre><code>' + buf.join('\n') + '</code></pre>'; i++; continue;
+    }
+    var h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) { flushPara(); html += '<h' + h[1].length + '>' + inline(h[2]) + '</h' + h[1].length + '>'; i++; continue; }
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { flushPara(); html += '<hr>'; i++; continue; }
+    if (/^\s*>\s?/.test(line)) {
+      flushPara(); var q = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) { q.push(inline(lines[i].replace(/^\s*>\s?/, ''))); i++; }
+      html += '<blockquote>' + q.join('<br>') + '</blockquote>'; continue;
+    }
+    if (/^\s*[-*+]\s+/.test(line)) {
+      flushPara(); var ul = [];
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { ul.push('<li>' + inline(lines[i].replace(/^\s*[-*+]\s+/, '')) + '</li>'); i++; }
+      html += '<ul>' + ul.join('') + '</ul>'; continue;
+    }
+    if (/^\s*\d+[.)]\s+/.test(line)) {
+      flushPara(); var ol = [];
+      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) { ol.push('<li>' + inline(lines[i].replace(/^\s*\d+[.)]\s+/, '')) + '</li>'); i++; }
+      html += '<ol>' + ol.join('') + '</ol>'; continue;
+    }
+    para.push(line); i++;
+  }
+  flushPara();
+  return html;
+}
+</script>
+{% endblock %}

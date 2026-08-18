@@ -25,14 +25,34 @@
   .unit-choice:hover { transform: translateY(-1px); border-color: var(--c-green); }
   .learn-start-submit { margin-top: 16px; display: flex; justify-content: flex-end; }
   @media (max-width: 640px) { .setup-row { grid-template-columns: 1fr; } .learn-start-submit .btn { width: 100%; } }
+
+  /* 快速开始 */
+  .quick-start-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .quick-card, button.quick-card { display: block; width: 100%; text-align: left; padding: 18px; border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface); text-decoration: none; color: inherit; font: inherit; transition: transform .15s, border-color .15s, box-shadow .15s; cursor: pointer; }
+  .quick-card:hover { transform: translateY(-2px); border-color: var(--c-green); box-shadow: var(--shadow-md); }
+  button.quick-card:hover { background: var(--c-surface); }
+  .preset-card { position: relative; }
+  .preset-delete { opacity: 0.7; padding: 4px 6px; }
+  .preset-delete:hover { opacity: 1; }
+  .quick-icon { font-size: 1.75rem; color: var(--c-green); margin-bottom: 8px; }
+  .quick-title { font-weight: 700; font-size: var(--fs-lg); margin-bottom: 4px; }
+  .quick-desc { font-size: var(--fs-sm); color: var(--c-text-2); line-height: 1.5; }
+  .custom-setup-details { border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface); }
+  .custom-setup-details > summary { padding: 14px 18px; cursor: pointer; list-style: none; font-weight: 600; margin-bottom: 0; }
+  .custom-setup-details > summary::-webkit-details-marker { display: none; }
+  .custom-setup-details > summary::after { content: '+'; float: right; color: var(--c-text-2); }
+  .custom-setup-details[open] > summary::after { content: '−'; }
+  .custom-setup-details > .custom-setup { border: none; border-radius: 0; }
+  @media (max-width: 640px) { .quick-start-grid { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
 
 {% block content %}
 <form id="learnForm" class="learn-setup" action="{% url 'words:learn_session' %}" method="get">
+  {% csrf_token %}
 
   <h2 class="setup-title">开始背诵</h2>
-  <p class="setup-subtitle" style="margin-bottom: 20px;">先完成今日任务，或按自己的节奏创建一次背诵。</p>
+  <p class="setup-subtitle" style="margin-bottom: 20px;">点一下就能开始，高级设置可以展开调整。</p>
 
   {% if plan_today %}
   <!-- 一键开始今日学习 -->
@@ -57,8 +77,55 @@
   </div>
   {% endif %}
 
-  <div class="card custom-setup">
-    <div class="card-header">自定义背诵</div>
+  <!-- 快速开始 -->
+  <div class="card" style="margin-bottom: 20px;">
+    <div class="card-header">快速开始</div>
+    <div class="quick-start-grid">
+      <a href="{% url 'words:learn_session' %}?scope=unknown&mode=sequential&batch={{ batch_size }}&check=none" class="quick-card">
+        <div class="quick-icon"><i class="ph ph-play-circle"></i></div>
+        <div class="quick-title">顺序背新词</div>
+        <div class="quick-desc">按单元顺序背诵未掌握的单词，默认每批 {{ batch_size }} 个</div>
+      </a>
+      <a href="{% url 'words:learn_session' %}?scope=unknown&mode=random&batch={{ batch_size }}&check=none" class="quick-card">
+        <div class="quick-icon"><i class="ph ph-shuffle"></i></div>
+        <div class="quick-title">乱序背新词</div>
+        <div class="quick-desc">随机打乱未掌握单词，适合检验记忆</div>
+      </a>
+      <a href="{% url 'words:learn_session' %}?scope=unknown&mode=sequential&batch={{ batch_size }}&check=spelling" class="quick-card">
+        <div class="quick-icon"><i class="ph ph-pencil-simple"></i></div>
+        <div class="quick-title">拼写检测</div>
+        <div class="quick-desc">看中文释义默写英文单词</div>
+      </a>
+      <a href="{% url 'words:learn_session' %}?scope=unknown&mode=sequential&batch={{ batch_size }}&check=gates" class="quick-card">
+        <div class="quick-icon"><i class="ph ph-check-circle"></i></div>
+        <div class="quick-title">高效背诵</div>
+        <div class="quick-desc">拼写 + 释义默写，写对才算过</div>
+      </a>
+      {% for preset in presets %}
+      <div class="quick-card preset-card" data-url="{% url 'words:learn_session' %}?scope={{ preset.params.scope|default:'unknown' }}&mode={{ preset.params.mode|default:'sequential' }}&batch={{ preset.params.batch|default:batch_size }}&check={{ preset.params.check|default:'none' }}{% for u in preset.params.units|default_if_none:'' %}&units={{ u }}{% endfor %}" onclick="startPreset(this)">
+        <div class="flex justify-between items-start">
+          <div class="quick-icon"><i class="ph ph-lightning"></i></div>
+          <button type="button" class="btn btn-ghost btn-sm preset-delete" data-id="{{ preset.id }}" data-name="{{ preset.name }}" title="删除" onclick="event.stopPropagation(); deletePreset(this)"><i class="ph ph-trash"></i></button>
+        </div>
+        <div class="quick-title">{{ preset.name }}</div>
+        <div class="quick-desc">{{ preset.params.scope|default:'未掌握' }} · {{ preset.params.mode|default:'顺序' }} · {{ preset.params.check|default:'纯背诵' }}</div>
+      </div>
+      {% endfor %}
+      <button type="button" class="quick-card" onclick="toggleCustomLearn()">
+        <div class="quick-icon"><i class="ph ph-sliders-horizontal"></i></div>
+        <div class="quick-title">自定义</div>
+        <div class="quick-desc">自己选范围、模式、检测方式和单元</div>
+      </button>
+    </div>
+  </div>
+
+  <details id="customLearnDetails" class="custom-setup-details">
+    <summary class="card-header">自定义背诵</summary>
+    <div class="card custom-setup">
+      <div class="preset-save-row" style="display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap;">
+        <input type="text" id="presetName" class="form-input" placeholder="给这套配置起个名字" style="flex: 1; min-width: 160px;">
+        <button type="button" class="btn btn-secondary" onclick="saveLearnPreset()"><i class="ph ph-bookmark"></i> 保存为预设</button>
+      </div>
     <div class="setup-row">
     <div class="choice-group">
       <span class="choice-group-title">背诵范围</span>
@@ -161,6 +228,7 @@
       </div>
     </div>
   </div>
+  </details>
 </form>
 {% endblock %}
 
@@ -211,6 +279,68 @@ function showToast(message, type) {
     toast.style.opacity = '0';
     setTimeout(() => toast.remove(), 300);
   }, 2500);
+}
+
+function toggleCustomLearn() {
+  const details = document.getElementById('customLearnDetails');
+  if (!details) return;
+  details.open = !details.open;
+  if (details.open) {
+    details.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+async function saveLearnPreset() {
+  const nameInput = document.getElementById('presetName');
+  const name = (nameInput.value || '').trim();
+  if (!name) {
+    showToast('请输入预设名称', 'error');
+    return;
+  }
+  const form = document.getElementById('learnForm');
+  const formData = new FormData(form);
+  const params = {};
+  formData.forEach((value, key) => {
+    if (key === 'csrfmiddlewaretoken') return;
+    if (key === 'units') {
+      params[key] = params[key] || [];
+      params[key].push(value);
+    } else {
+      params[key] = value;
+    }
+  });
+  try {
+    const res = await VOCAB_API.post('/api/preset/create/', { name: name, preset_type: 'learn', params: params });
+    if (res.success) {
+      showToast(res.message, 'success');
+      setTimeout(function () { window.location.reload(); }, 500);
+    } else {
+      showToast(res.error || '保存失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
+}
+
+function startPreset(card) {
+  window.location.href = card.getAttribute('data-url');
+}
+
+async function deletePreset(btn) {
+  const id = btn.getAttribute('data-id');
+  const name = btn.getAttribute('data-name');
+  if (!id || !confirm('确定要删除预设"' + name + '"吗？')) return;
+  try {
+    const res = await VOCAB_API.post('/api/preset/delete/' + id + '/');
+    if (res.success) {
+      showToast(res.message, 'success');
+      setTimeout(function () { window.location.reload(); }, 500);
+    } else {
+      showToast(res.error || '删除失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败', 'error');
+  }
 }
 
 // 一键开始今日学习：按计划单元范围自动跳转

@@ -350,6 +350,7 @@ class UserSettings(models.Model):
         ('sepia', '复古牛皮'),
         ('dark', '深夜书桌'),
         ('nightblue', '星空午夜'),
+        ('custom', '自定义壁纸'),
     ]
 
     font_size = models.CharField(max_length=10, choices=FONT_CHOICES,
@@ -377,6 +378,8 @@ class UserSettings(models.Model):
         on_delete=models.SET_NULL, related_name='+', verbose_name='速记生成模型')
     meaning_check_model = models.ForeignKey('AIModel', null=True, blank=True,
         on_delete=models.SET_NULL, related_name='+', verbose_name='释义默写判定模型')
+    exam_model = models.ForeignKey('AIModel', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='+', verbose_name='考研写作工坊模型')
 
     class Meta:
         verbose_name = '用户设置'
@@ -391,6 +394,26 @@ class UserSettings(models.Model):
         if not settings:
             settings = cls.objects.create()
         return settings
+
+
+class StudyPreset(models.Model):
+    """用户保存的背诵/复习自定义模式预设"""
+    PRESET_TYPE_CHOICES = [
+        ('learn', '背诵'),
+        ('review', '复习'),
+    ]
+    name = models.CharField(max_length=50, verbose_name='预设名称')
+    preset_type = models.CharField(max_length=10, choices=PRESET_TYPE_CHOICES, verbose_name='类型')
+    params = models.JSONField(default=dict, verbose_name='参数')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = '学习预设'
+        verbose_name_plural = '学习预设'
+
+    def __str__(self):
+        return self.name
 
 
 class Conversation(models.Model):
@@ -568,3 +591,133 @@ class Music(models.Model):
         m = int(self.duration) // 60
         s = int(self.duration) % 60
         return f'{m}:{s:02d}'
+
+
+class ExamQuestion(models.Model):
+    """考研英语真题库：作文 / 翻译题目"""
+    EXAM_TYPE_CHOICES = [
+        ('english1', '英语一'),
+        ('english2', '英语二'),
+    ]
+    QUESTION_TYPE_CHOICES = [
+        ('small_essay', '小作文'),
+        ('big_essay', '大作文'),
+        ('translation', '翻译'),
+    ]
+    year = models.IntegerField(verbose_name='年份', db_index=True)
+    exam_type = models.CharField(max_length=10, choices=EXAM_TYPE_CHOICES,
+        verbose_name='考试类型')
+    question_type = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES,
+        verbose_name='题型')
+    genre = models.CharField(max_length=50, blank=True, default='', verbose_name='体裁',
+        help_text='小作文：书信/通知/道歉/邀请…；大作文：图画/图表')
+    title = models.CharField(max_length=200, blank=True, default='', verbose_name='标题')
+    content = models.TextField(blank=True, default='', verbose_name='题目内容')
+    prompt = models.TextField(blank=True, default='', verbose_name='写作要求/题干')
+    model_answer = models.TextField(blank=True, default='', verbose_name='参考范文/参考译文')
+    tags = models.JSONField(default=list, blank=True, verbose_name='主题标签')
+    difficulty = models.IntegerField(default=3, verbose_name='难度(1-5)')
+    is_imported = models.BooleanField(default=True, verbose_name='已入库')
+
+    class Meta:
+        ordering = ['exam_type', '-year', 'question_type']
+        unique_together = [('exam_type', 'year', 'question_type')]
+        verbose_name = '考研真题'
+        verbose_name_plural = '考研真题'
+
+    def __str__(self):
+        return f'{self.get_exam_type_display()} {self.year}年 {self.get_question_type_display()}'
+
+
+class WritingPractice(models.Model):
+    """写作/翻译练习记录：用户作答 + AI 生成 + AI 批改结果"""
+    MODE_CHOICES = [
+        ('essay', '作文'),
+        ('translation', '翻译'),
+    ]
+    user = models.ForeignKey('auth.User', null=True, blank=True,
+        on_delete=models.SET_NULL, verbose_name='用户')
+    question = models.ForeignKey(ExamQuestion, on_delete=models.CASCADE,
+        related_name='practices', verbose_name='真题')
+    mode = models.CharField(max_length=20, choices=MODE_CHOICES, default='essay',
+        verbose_name='练习类型')
+    source = models.CharField(max_length=20, default='ai', verbose_name='来源',
+        help_text='ai=AI代写, manual=手动写作, translation=翻译练习')
+    user_input = models.TextField(blank=True, default='', verbose_name='用户作答')
+    ai_output = models.TextField(blank=True, default='', verbose_name='AI 范文/译文')
+    score_json = models.TextField(blank=True, default='{}', verbose_name='批改评分数据',
+        help_text='JSON 格式，各维度评分与建议')
+    feedback = models.TextField(blank=True, default='', verbose_name='AI 批改意见')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = '写作练习'
+        verbose_name_plural = '写作练习'
+
+    def __str__(self):
+        return f'{self.question} - {self.get_mode_display()}'
+
+    def get_score(self):
+        try:
+            return json.loads(self.score_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+
+class WritingPhrase(models.Model):
+    """写作好句/错题沉淀：从练习中收集的高级表达与错误点"""
+    user = models.ForeignKey('auth.User', null=True, blank=True,
+        on_delete=models.SET_NULL, verbose_name='用户')
+    practice = models.ForeignKey(WritingPractice, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='phrases', verbose_name='来源练习')
+    phrase = models.TextField(verbose_name='好句/错误句子')
+    meaning = models.TextField(blank=True, default='', verbose_name='释义/修改建议')
+    phrase_type = models.CharField(max_length=20, default='nice',
+        choices=[('nice', '好句'), ('error', '错误点'), ('replace', '替换表达')],
+        verbose_name='类型')
+    is_collected = models.BooleanField(default=True, verbose_name='已收藏')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = '写作好句'
+        verbose_name_plural = '写作好句'
+
+    def __str__(self):
+        return self.phrase[:40]
+
+
+class AICallLog(models.Model):
+    """AI 调用日志：记录每次调用详情，便于追溯与排查"""
+    ACTION_CHOICES = [
+        ('exam_generate', '作文生成'),
+        ('exam_grade', '作文批改'),
+        ('exam_grade_translation', '译文批改'),
+        ('exam_translate_analyze', '翻译拆解'),
+        ('exam_themes_report', '命题规律分析'),
+    ]
+    user = models.ForeignKey('auth.User', null=True, blank=True,
+        on_delete=models.SET_NULL, verbose_name='用户')
+    practice = models.ForeignKey(WritingPractice, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='ai_calls', verbose_name='关联练习')
+    action = models.CharField(max_length=40, default='exam_generate',
+        verbose_name='调用功能')
+    model_id = models.CharField(max_length=120, blank=True, default='',
+        verbose_name='模型')
+    success = models.BooleanField(default=True, verbose_name='是否成功')
+    error = models.TextField(blank=True, default='', verbose_name='错误信息')
+    duration_ms = models.IntegerField(default=0, verbose_name='耗时(毫秒)')
+    prompt_preview = models.TextField(blank=True, default='', verbose_name='提示词预览',
+        help_text='记录提示词前 500 字，便于追溯')
+    response_preview = models.TextField(blank=True, default='', verbose_name='响应预览',
+        help_text='记录响应前 500 字')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='调用时间')
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'AI 调用日志'
+        verbose_name_plural = 'AI 调用日志'
+
+    def __str__(self):
+        return f'{self.get_action_display()} - {self.success}'

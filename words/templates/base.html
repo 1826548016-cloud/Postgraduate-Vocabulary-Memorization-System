@@ -20,6 +20,8 @@
   FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
   -->
   <div class="app-layout">
+    <!-- 自定义主题壁纸层 -->
+    <div id="themeWallpaper" class="theme-wallpaper"></div>
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-logo">
@@ -29,42 +31,65 @@
         <a href="{% url 'words:dashboard' %}" data-nav="dashboard">
           <i class="ph ph-chart-bar"></i> <span>总调度</span>
         </a>
-        <a href="{% url 'words:word_list' %}" data-nav="words">
-          <i class="ph ph-books"></i> <span>红宝书</span>
-        </a>
-        <a href="{% url 'words:learn_start' %}" data-nav="learn">
-          <i class="ph ph-target"></i> <span>背诵</span>
-        </a>
-        <a href="{% url 'words:review_start' %}" data-nav="review">
-          <i class="ph ph-arrows-clockwise"></i> <span>复习</span>
-        </a>
-        <a href="{% url 'words:weak_words' %}" data-nav="weak">
-          <i class="ph ph-warning-circle"></i> <span>薄弱词</span>
-        </a>
-        <a href="{% url 'words:statistics' %}" data-nav="stats">
-          <i class="ph ph-trend-up"></i> <span>统计</span>
-        </a>
-        <a href="{% url 'words:study_plan' %}" data-nav="plan">
-          <i class="ph ph-calendar-blank"></i> <span>计划</span>
-        </a>
-        <a href="{% url 'words:favorites_list' %}" data-nav="favorites">
-          <i class="ph ph-star"></i> <span>收藏词汇</span>
-        </a>
-        <a href="{% url 'words:exam' %}" data-nav="exam">
-          <i class="ph ph-note-pencil"></i> <span>模拟考试</span>
-        </a>
-        <a href="{% url 'words:ai_chat_page' %}" data-nav="ai-chat">
-          <i class="ph ph-sparkle"></i> <span>AI 助手</span>
-        </a>
-        <a href="{% url 'words:pdf_library' %}" data-nav="library">
-          <i class="ph ph-stack"></i> <span>资料库</span>
-        </a>
-        <a href="{% url 'words:music_library' %}" data-nav="music">
-          <i class="ph ph-music-notes"></i> <span>音乐库</span>
-        </a>
-        <a href="{% url 'words:settings_page' %}" data-nav="settings">
-          <i class="ph ph-gear"></i> <span>settings</span>
-        </a>
+
+        <div class="nav-group" data-group="words">
+          <div class="nav-group-title">词库</div>
+          <a href="{% url 'words:word_list' %}" data-nav="words">
+            <i class="ph ph-books"></i> <span>红宝书</span>
+          </a>
+          <a href="{% url 'words:weak_words' %}" data-nav="weak">
+            <i class="ph ph-warning-circle"></i> <span>薄弱词</span>
+          </a>
+          <a href="{% url 'words:favorites_list' %}" data-nav="favorites">
+            <i class="ph ph-star"></i> <span>收藏词汇</span>
+          </a>
+        </div>
+
+        <div class="nav-group" data-group="learn">
+          <div class="nav-group-title">学习</div>
+          <a href="{% url 'words:learn_start' %}" data-nav="learn">
+            <i class="ph ph-target"></i> <span>背诵</span>
+          </a>
+          <a href="{% url 'words:review_start' %}" data-nav="review">
+            <i class="ph ph-arrows-clockwise"></i> <span>复习</span>
+          </a>
+        </div>
+
+        <div class="nav-group" data-group="insight">
+          <div class="nav-group-title">分析</div>
+          <a href="{% url 'words:statistics' %}" data-nav="stats">
+            <i class="ph ph-trend-up"></i> <span>统计</span>
+          </a>
+          <a href="{% url 'words:study_plan' %}" data-nav="plan">
+            <i class="ph ph-calendar-blank"></i> <span>计划</span>
+          </a>
+        </div>
+
+        <div class="nav-group" data-group="exam">
+          <div class="nav-group-title">考试</div>
+          <a href="{% url 'words:exam' %}" data-nav="exam">
+            <i class="ph ph-note-pencil"></i> <span>模拟考试</span>
+          </a>
+          <a href="{% url 'words:exam_workshop' %}" data-nav="workshop">
+            <i class="ph ph-pen-nib"></i> <span>写作工坊</span>
+          </a>
+        </div>
+
+        <div class="nav-group" data-group="tools">
+          <div class="nav-group-title">工具</div>
+          <a href="{% url 'words:ai_chat_page' %}" data-nav="ai-chat">
+            <i class="ph ph-sparkle"></i> <span>AI 助手</span>
+          </a>
+          <a href="{% url 'words:pdf_library' %}" data-nav="library">
+            <i class="ph ph-stack"></i> <span>资料库</span>
+          </a>
+          <a href="{% url 'words:music_library' %}" data-nav="music">
+            <i class="ph ph-music-notes"></i> <span>音乐库</span>
+          </a>
+          <a href="{% url 'words:settings_page' %}" data-nav="settings">
+            <i class="ph ph-gear"></i> <span>设置</span>
+          </a>
+        </div>
       </nav>
     </aside>
 
@@ -100,15 +125,233 @@
   {% block extra_scripts %}{% endblock %}
 
   <script>
-  // 5 套主题循环切换
-  var THEMES = ['light', 'blue', 'sepia', 'dark', 'nightblue'];
+  // 5 套主题 + 自定义壁纸模式循环切换
+  var THEMES = ['light', 'blue', 'sepia', 'dark', 'nightblue', 'custom'];
   var THEME_ICONS = {
     'light': 'ph-sun',
     'blue': 'ph-drop',
     'sepia': 'ph-scroll',
     'dark': 'ph-moon',
-    'nightblue': 'ph-stars'
+    'nightblue': 'ph-stars',
+    'custom': 'ph-image'
   };
+  var WALLPAPER_KEY = 'vocab-theme-wallpaper-id'; // 当前选中壁纸 id
+  var LEGACY_KEY = 'vocab-theme-wallpaper';       // 旧版单壁纸 key（兼容迁移）
+  var _wallpaperUrl = null; // 当前壁纸 objectURL
+  var _wallpapers = [];     // 壁纸列表缓存 [{id, blob, ts}]
+
+  // ===== 壁纸存储：IndexedDB（本地运行不限大小，支持多张） =====
+  var WallpaperDB = (function () {
+    var DB_NAME = 'vocab-wallpaper-db';
+    var STORE = 'wallpaper';
+    var LIST_KEY = 'wallpaper-list';
+    var LEGACY_KEY_INNER = 'custom-wallpaper';
+    var dbPromise = null;
+    function open() {
+      if (dbPromise) return dbPromise;
+      dbPromise = new Promise(function (resolve, reject) {
+        var req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = function () {
+          if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE);
+        };
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
+      });
+      return dbPromise;
+    }
+    function getList() {
+      return open().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var tx = db.transaction(STORE, 'readonly');
+          var store = tx.objectStore(STORE);
+          var req = store.get(LIST_KEY);
+          req.onsuccess = function () {
+            if (req.result) { resolve(req.result); return; }
+            // 兼容迁移：旧版单壁纸 -> 列表
+            var oldReq = store.get(LEGACY_KEY_INNER);
+            oldReq.onsuccess = function () {
+              var oldVal = oldReq.result;
+              if (oldVal) {
+                var list = [{ id: 'legacy', blob: oldVal, ts: Date.now() }];
+                var tx2 = db.transaction(STORE, 'readwrite');
+                tx2.objectStore(STORE).put(list, LIST_KEY);
+                tx2.objectStore(STORE).delete(LEGACY_KEY_INNER);
+                resolve(list);
+              } else {
+                resolve([]);
+              }
+            };
+            oldReq.onerror = function () { resolve([]); };
+          };
+          req.onerror = function () { reject(req.error); };
+        });
+      });
+    }
+    function saveList(list) {
+      return open().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var tx = db.transaction(STORE, 'readwrite');
+          tx.objectStore(STORE).put(list, LIST_KEY);
+          tx.oncomplete = function () { resolve(list); };
+          tx.onerror = function () { reject(tx.error); };
+        });
+      });
+    }
+    function add(blob) {
+      return getList().then(function (list) {
+        var item = { id: 'w' + Date.now() + '-' + Math.random().toString(36).slice(2, 8), blob: blob, ts: Date.now() };
+        list.push(item);
+        return saveList(list).then(function () { return item; });
+      });
+    }
+    function remove(id) {
+      return getList().then(function (list) {
+        var next = list.filter(function (it) { return it.id !== id; });
+        return saveList(next);
+      });
+    }
+    return { getList: getList, add: add, remove: remove };
+  })();
+
+  function _setWallpaperBg(url) {
+    var layer = document.getElementById('themeWallpaper');
+    if (!layer) return;
+    if (_wallpaperUrl && _wallpaperUrl !== url) {
+      try { URL.revokeObjectURL(_wallpaperUrl); } catch (e) {}
+    }
+    _wallpaperUrl = url || null;
+    layer.style.backgroundImage = url ? 'url(' + url + ')' : '';
+  }
+
+  function _currentWallpaperId() {
+    var id = null;
+    try { id = localStorage.getItem(WALLPAPER_KEY); } catch (e) {}
+    return id || null;
+  }
+  function _saveCurrentWallpaperId(id) {
+    try { localStorage.setItem(WALLPAPER_KEY, id || ''); } catch (e) {}
+  }
+
+  // 从列表应用当前选中的壁纸（供页面和设置页共用）
+  function applyWallpaperFromList() {
+    var layer = document.getElementById('themeWallpaper');
+    return WallpaperDB.getList().then(function (list) {
+      _wallpapers = list;
+      if (!list.length) {
+        _setWallpaperBg(null);
+        if (layer) layer.classList.remove('active');
+        return list;
+      }
+      var id = _currentWallpaperId();
+      var item = null;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id) { item = list[i]; break; }
+      }
+      if (!item) item = list[list.length - 1]; // 无选中时默认最近上传的一张
+      if (item) {
+        _saveCurrentWallpaperId(item.id);
+        _setWallpaperBg(URL.createObjectURL(item.blob));
+      }
+      return list;
+    }).catch(function () { return []; });
+  }
+
+  // 应用自定义壁纸（主题为 custom 且有壁纸时显示）
+  function applyThemeWallpaper() {
+    var layer = document.getElementById('themeWallpaper');
+    if (!layer) return;
+    var theme = document.documentElement.getAttribute('data-theme');
+    if (theme !== 'custom') {
+      _setWallpaperBg(null);
+      layer.classList.remove('active');
+      return;
+    }
+    if (_wallpaperUrl) {
+      layer.classList.add('active');
+      return;
+    }
+    applyWallpaperFromList().then(function (list) {
+      if (list.length) layer.classList.add('active');
+    });
+  }
+
+  // 上传新壁纸（供设置页调用）
+  function uploadThemeWallpaper(file, cb) {
+    cb = cb || function () {};
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      showToast('请选择图片文件', 'error');
+      cb(false);
+      return;
+    }
+    WallpaperDB.add(file).then(function (item) {
+      try { localStorage.removeItem(LEGACY_KEY); } catch (e) {}
+      _saveCurrentWallpaperId(item.id);
+      _setWallpaperBg(URL.createObjectURL(item.blob));
+      var layer = document.getElementById('themeWallpaper');
+      var theme = document.documentElement.getAttribute('data-theme');
+      if (theme === 'custom' && layer) layer.classList.add('active');
+      window.dispatchEvent(new CustomEvent('vocab-wallpaper-change'));
+      showToast('壁纸已保存', 'success');
+      cb(true);
+    }).catch(function () {
+      showToast('保存壁纸失败，请重试', 'error');
+      cb(false);
+    });
+  }
+
+  // 切换指定壁纸（供设置页缩略图点击）
+  function selectThemeWallpaper(id) {
+    WallpaperDB.getList().then(function (list) {
+      _wallpapers = list;
+      var item = null;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id) { item = list[i]; break; }
+      }
+      if (!item) { showToast('壁纸不存在', 'error'); return; }
+      _saveCurrentWallpaperId(id);
+      _setWallpaperBg(URL.createObjectURL(item.blob));
+      var layer = document.getElementById('themeWallpaper');
+      var theme = document.documentElement.getAttribute('data-theme');
+      if (theme === 'custom' && layer) layer.classList.add('active');
+      window.dispatchEvent(new CustomEvent('vocab-wallpaper-change'));
+      showToast('已切换壁纸', 'success');
+    }).catch(function () {});
+  }
+
+  // 删除指定壁纸
+  function deleteThemeWallpaper(id) {
+    WallpaperDB.remove(id).then(function () {
+      return applyWallpaperFromList();
+    }).then(function (list) {
+      if (!list.length) {
+        _saveCurrentWallpaperId('');
+        _setWallpaperBg(null);
+        var layer = document.getElementById('themeWallpaper');
+        if (layer) layer.classList.remove('active');
+      } else {
+        var cur = _currentWallpaperId();
+        if (cur === id || !cur) _saveCurrentWallpaperId(list[list.length - 1].id);
+        var theme = document.documentElement.getAttribute('data-theme');
+        var layer2 = document.getElementById('themeWallpaper');
+        if (theme === 'custom' && layer2 && list.length) layer2.classList.add('active');
+      }
+      window.dispatchEvent(new CustomEvent('vocab-wallpaper-change'));
+      showToast('已删除壁纸', 'success');
+    }).catch(function () {
+      showToast('操作失败，请重试', 'error');
+    });
+  }
+
+  // 恢复默认背景（不删除已上传壁纸，仅取消显示）
+  function clearThemeWallpaper() {
+    _saveCurrentWallpaperId('');
+    _setWallpaperBg(null);
+    var layer = document.getElementById('themeWallpaper');
+    if (layer) layer.classList.remove('active');
+    window.dispatchEvent(new CustomEvent('vocab-wallpaper-change'));
+    showToast('已恢复默认背景', 'success');
+  }
 
   // Theme init — restore from localStorage
   (function() {
@@ -116,6 +359,7 @@
     if (THEMES.indexOf(saved) === -1) saved = 'light';
     document.documentElement.setAttribute('data-theme', saved);
     document.getElementById('themeIcon').className = 'ph ' + THEME_ICONS[saved];
+    applyThemeWallpaper();
   })();
 
   function toggleTheme() {
@@ -127,6 +371,7 @@
     html.setAttribute('data-theme', next);
     localStorage.setItem('vocab-theme', next);
     document.getElementById('themeIcon').className = 'ph ' + THEME_ICONS[next];
+    applyThemeWallpaper();
     window.dispatchEvent(new CustomEvent('vocab-theme-change', { detail: { theme: next } }));
   }
 
@@ -136,7 +381,8 @@
     var path = location.pathname;
     navEls.forEach(function(a) { a.classList.remove('active'); });
     for (var i = navEls.length - 1; i >= 0; i--) {
-      if (path === navEls[i].getAttribute('href')) {
+      var href = navEls[i].getAttribute('href');
+      if (path === href || (href.indexOf('/workshop/') !== -1 && path.indexOf('/workshop/') === 0)) {
         navEls[i].classList.add('active'); return;
       }
     }

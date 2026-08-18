@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}AI 调用日志 - 考研写作工坊{% endblock %}
+
+{% block page_title %}AI 调用日志{% endblock %}
+
+{% block content %}
+<!-- 统计 -->
+<div class="grid-3 mb-4" style="gap: 14px;">
+  <div class="card stat-card">
+    <div class="stat-value">{{ total_count }}</div>
+    <div class="stat-label">累计调用次数</div>
+  </div>
+  <div class="card stat-card">
+    <div class="stat-value" style="color: var(--c-green);">{{ success_count }}</div>
+    <div class="stat-label">成功</div>
+  </div>
+  <div class="card stat-card">
+    <div class="stat-value" style="color: var(--c-red);">{{ fail_count }}</div>
+    <div class="stat-label">失败</div>
+  </div>
+</div>
+
+<!-- 日志列表 -->
+<div class="card">
+  <div class="card-header flex justify-between items-center">
+    <span>调用明细</span>
+    <div class="flex gap-2" style="background: var(--c-surface-2); padding: 4px; border-radius: 10px;">
+      <a href="{% url 'words:exam_logs' %}" class="btn btn-sm {% if not current_action %}btn-primary{% else %}btn-secondary{% endif %}" style="border:none; box-shadow:none;">全部</a>
+      {% for code, label in action_options %}
+      <a href="{% url 'words:exam_logs' %}?action={{ code }}" class="btn btn-sm {% if current_action == code %}btn-primary{% else %}btn-secondary{% endif %}" style="border:none; box-shadow:none;">{{ label }}</a>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if logs %}
+  <div class="table-wrap">
+    <table class="word-table">
+      <thead>
+        <tr><th>时间</th><th>功能</th><th>年份</th><th>模型</th><th>耗时</th><th>结果</th><th>详情</th></tr>
+      </thead>
+      <tbody>
+        {% for l in logs %}
+        <tr>
+          <td class="text-secondary text-sm">{{ l.created_at|date:"m-d H:i:s" }}</td>
+          <td>{{ l.get_action_display }}</td>
+          <td>{% if l.practice.question %}{{ l.practice.question.year }} 年{% else %}-{% endif %}</td>
+          <td class="text-secondary text-sm">{{ l.model_id }}</td>
+          <td class="text-secondary text-sm">{{ l.duration_ms }} ms</td>
+          <td>
+            {% if l.success %}<span class="badge badge-master">成功</span>
+            {% else %}<span class="badge badge-error">失败</span>{% endif %}
+          </td>
+          <td><button class="btn btn-secondary btn-xs" onclick="viewLog({{ l.id }})">查看</button></td>
+        </tr>
+        <tr id="log-detail-{{ l.id }}" style="display:none;">
+          <td colspan="7" style="padding: 0;">
+            <div style="padding: 16px 20px; background: var(--c-surface-2); display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+              <div>
+                <div class="text-secondary text-sm" style="margin-bottom:6px;">提示词预览</div>
+                <pre style="white-space:pre-wrap; margin:0; font-family:inherit; font-size:var(--fs-xs); max-height:220px; overflow:auto;">{{ l.prompt_preview }}</pre>
+              </div>
+              <div>
+                <div class="text-secondary text-sm" style="margin-bottom:6px;">{% if l.success %}响应预览{% else %}错误信息{% endif %}</div>
+                {% if l.success %}
+                <pre style="white-space:pre-wrap; margin:0; font-family:inherit; font-size:var(--fs-xs); max-height:220px; overflow:auto;">{{ l.response_preview }}</pre>
+                {% else %}
+                <pre style="white-space:pre-wrap; margin:0; font-family:inherit; font-size:var(--fs-xs); color: var(--c-red);">{{ l.error }}</pre>
+                {% endif %}
+              </div>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-state-title">暂无 AI 调用记录</div>
+    <div>进行作文生成、批改、翻译拆解后这里会显示记录</div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function viewLog(id) {
+  var tr = document.getElementById('log-detail-' + id);
+  if (tr) tr.style.display = tr.style.display === 'none' ? '' : 'none';
+}
+</script>
+{% endblock %}

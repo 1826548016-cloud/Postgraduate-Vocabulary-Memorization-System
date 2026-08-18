@@ -24,13 +24,17 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from .models import (Unit, Word, StudyProgress, StudyPlan,
-                     DailyCheckIn, Favorite, Note, QuickMemory, AIModel, StudySession, UserSettings, ChatMessage, ImportLog, Conversation, LearningReport, StudyRecord, PdfDocument, Music)
+                     DailyCheckIn, Favorite, Note, QuickMemory, AIModel, StudySession, UserSettings, ChatMessage, ImportLog, Conversation, LearningReport, StudyRecord, PdfDocument, Music, StudyPreset, ExamQuestion, WritingPractice, WritingPhrase, AICallLog)
 from .ai_prompts import (
     quick_memory_prompt, ASSISTANT_SYSTEM_PROMPT, assistant_word_context,
     pos_grouping_prompt, examples_prompt,
     RECOGNIZE_JSON_SCHEMA, RECOGNIZE_COMMON_RULES,
     recognize_image_prompt, recognize_text_prompt, recognize_file_prompt,
     ai_review_prompt, weekly_report_prompt,
+)
+from .ai_exam_prompts import (
+    build_vocabulary_profile, essay_generation_prompt, essay_grading_prompt,
+    translation_help_prompt, translation_grading_prompt, themes_report_prompt,
 )
 
 
@@ -204,9 +208,10 @@ def learn_start(request):
     if active_plan:
         plan_today = _get_plan_today_data(active_plan, today)
     settings_obj = UserSettings.get_settings()
+    presets = StudyPreset.objects.filter(preset_type='learn')
     return render(request, 'learn_start.html', {
         'units': units, 'plan_today': plan_today, 'batch_size': settings_obj.batch_size,
-        'batch_options': [10, 20, 30, 50],
+        'batch_options': [10, 20, 30, 50], 'presets': presets,
     })
 
 
@@ -285,9 +290,12 @@ def review_start(request):
         mastered=Count('words__progress', filter=Q(words__progress__status='mastered'))
     ).all()
     settings_obj = UserSettings.get_settings()
+    presets = StudyPreset.objects.filter(preset_type='review')
     return render(request, 'review_start.html', {
         'units': units, 'batch_size': settings_obj.batch_size,
         'batch_options': [10, 20, 30, 50],
+        'daily_review_target': settings_obj.daily_review_target,
+        'presets': presets,
     })
 
 
@@ -1250,6 +1258,46 @@ def api_plan_delete(request, plan_id):
         return JsonResponse({'error': str(e)}, status=400)
 
 
+@require_http_methods(['POST'])
+def api_preset_create(request):
+    """保存当前自定义配置为快速开始预设"""
+    try:
+        data = json.loads(request.body or '{}')
+        name = (data.get('name') or '').strip()
+        preset_type = data.get('preset_type')
+        params = data.get('params') or {}
+        if not name:
+            return JsonResponse({'success': False, 'error': '请输入预设名称'}, status=400)
+        if preset_type not in ('learn', 'review'):
+            return JsonResponse({'success': False, 'error': '无效预设类型'}, status=400)
+        preset = StudyPreset.objects.create(
+            name=name, preset_type=preset_type, params=params
+        )
+        return JsonResponse({
+            'success': True,
+            'id': preset.id,
+            'name': preset.name,
+            'message': f'已保存预设 "{preset.name}"',
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=400)
+
+
+@require_http_methods(['POST'])
+def api_preset_delete(request, preset_id):
+    """删除预设"""
+    try:
+        preset = get_object_or_404(StudyPreset, id=preset_id)
+        preset_name = preset.name
+        preset.delete()
+        return JsonResponse({
+            'success': True,
+            'message': f'已删除预设 "{preset_name}"',
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=400)
+
+
 def _get_plan_today_data(plan, today):
     """计算激活计划的今日学习数据（供页面渲染和 API 共用）"""
     unit_nums = plan.get_unit_range()
@@ -1958,6 +2006,7 @@ def api_settings(request):
             'review_model_id': settings_obj.review_model_id,
             'quick_memory_model_id': settings_obj.quick_memory_model_id,
             'meaning_check_model_id': settings_obj.meaning_check_model_id,
+            'exam_model_id': settings_obj.exam_model_id,
             'use_ai_meaning_check': settings_obj.use_ai_meaning_check,
         })
     try:
@@ -4209,3 +4258,533 @@ def api_music_update(request, song_id):
         return JsonResponse({'success': True, 'id': song.id, 'title': song.title})
     except Exception as e:
         return JsonResponse({'error': f'更新失败：{str(e)}'}, status=500)
+
+
+# ============================================================
+# 考研写作工坊
+# ============================================================
+
+def builtin_ai_exam_call(prompt, temperature=0.7, data=None, action='exam_generate', practice=None):
+    """考研工坊统一 AI 调用：复用现有模型配置体系（支持 DeepSeek 等 OpenAI 兼容接口）
+    模型优先级：前端指定 model_id > 设置页「考研写作工坊模型」 > 第一个启用模型。
+    调用详情（模型、耗时、成败、提示词预览）写入 AICallLog 供追溯。
+    """
+    import time as _time
+    t0 = _time.monotonic()
+    data = data or {}
+    if not data.get('model_id'):
+        settings_obj = UserSettings.get_settings()
+        if settings_obj.exam_model_id:
+            data['model_id'] = settings_obj.exam_model_id
+    try:
+        cfg = resolve_ai_model(data)
+    except ValueError as e:
+        _log_ai_call(action=action, practice=practice, model_id='', success=False,
+                     error=str(e), prompt=prompt, t0=t0, duration_ms=0)
+        return None, str(e)
+    payload = {
+        'model': cfg['model_id'],
+        'temperature': temperature,
+        'messages': [{'role': 'user', 'content': prompt}],
+    }
+    req = urllib.request.Request(
+        resolve_ai_endpoint(cfg['base_url'], cfg['endpoint']),
+        data=json.dumps(payload).encode('utf-8'),
+        headers=build_ai_headers(cfg['api_key']),
+        method='POST',
+    )
+    duration_ms = int((_time.monotonic() - t0) * 1000)
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8', 'ignore')
+        err = f'AI 接口错误 (HTTP {e.code}): {body[:300]}'
+        _log_ai_call(action, practice, cfg['model_id'], False, err, prompt, t0, duration_ms)
+        return None, err
+    except urllib.error.URLError as e:
+        err = f'无法连接 AI 服务: {e.reason}'
+        _log_ai_call(action, practice, cfg['model_id'], False, err, prompt, t0, duration_ms)
+        return None, err
+    content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+    _log_ai_call(action, practice, cfg['model_id'], True, '', prompt, t0, duration_ms, response=content)
+    return content, None
+
+
+def _log_ai_call(action, practice, model_id, success, error, prompt, t0, duration_ms, response=''):
+    """写入 AI 调用日志（内部辅助，异常不影响主流程）"""
+    try:
+        AICallLog.objects.create(
+            practice=practice,
+            action=action or 'exam_generate',
+            model_id=model_id or '',
+            success=bool(success),
+            error=(error or '')[:2000],
+            duration_ms=duration_ms,
+            prompt_preview=(prompt or '')[:500],
+            response_preview=(response or '')[:500],
+        )
+    except Exception:
+        pass
+
+
+def _bind_practice_to_last_log(action, practice):
+    """把最近一条未关联练习的指定动作日志绑定到新建的练习记录"""
+    try:
+        log = AICallLog.objects.filter(action=action, practice__isnull=True).order_by('-id').first()
+        if log:
+            log.practice = practice
+            log.save(update_fields=['practice'])
+    except Exception:
+        pass
+
+
+def exam_workshop(request):
+    """考研工坊首页"""
+    qs = ExamQuestion.objects.all()
+    stats = {
+        'total': qs.count(),
+        'english1': qs.filter(exam_type='english1').count(),
+        'english2': qs.filter(exam_type='english2').count(),
+        'essays': qs.filter(question_type__in=['small_essay', 'big_essay']).count(),
+        'translations': qs.filter(question_type='translation').count(),
+        'practices': WritingPractice.objects.count(),
+        'phrases': WritingPhrase.objects.filter(is_collected=True).count(),
+    }
+    # 最近练习
+    recent = WritingPractice.objects.select_related('question').all()[:8]
+    return render(request, 'exam_workshop.html', {
+        'stats': stats,
+        'recent_practices': recent,
+        'active_nav': 'workshop',
+        'essay_cards': [
+            {
+                'url': '/workshop/questions/?exam_type=english1&type=small_essay',
+                'icon': 'ph-envelope-simple', 'tone': 'red',
+                'title': '英语一小作文', 'desc': '书信 / 通知 / 邀请',
+            },
+            {
+                'url': '/workshop/questions/?exam_type=english1&type=big_essay',
+                'icon': 'ph-picture', 'tone': 'blue',
+                'title': '英语一大作文', 'desc': '图画 / 图表作文',
+            },
+            {
+                'url': '/workshop/questions/?exam_type=english2&type=small_essay',
+                'icon': 'ph-pen-nib', 'tone': 'green',
+                'title': '英语二小作文', 'desc': '书信 / 通知 / 邀请',
+            },
+            {
+                'url': '/workshop/questions/?exam_type=english2&type=big_essay',
+                'icon': 'ph-chart-bar', 'tone': 'amber',
+                'title': '英语二大作文', 'desc': '图表作文',
+            },
+        ],
+        'trans_cards': [
+            {
+                'url': '/workshop/questions/?exam_type=english1&type=translation',
+                'icon': 'ph-text-aa', 'tone': 'blue',
+                'title': '英语一翻译', 'desc': '长难句拆解',
+            },
+            {
+                'url': '/workshop/questions/?exam_type=english2&type=translation',
+                'icon': 'ph-translate', 'tone': 'green',
+                'title': '英语二翻译', 'desc': '段落翻译',
+            },
+        ],
+    })
+
+
+def exam_questions_page(request):
+    """真题列表页"""
+    exam_type = request.GET.get('exam_type', 'english1')
+    qtype = request.GET.get('type', '')
+    year = request.GET.get('year', '')
+    qs = ExamQuestion.objects.all()
+    if exam_type in ('english1', 'english2'):
+        qs = qs.filter(exam_type=exam_type)
+    if qtype in ('small_essay', 'big_essay', 'translation'):
+        qs = qs.filter(question_type=qtype)
+    if year:
+        qs = qs.filter(year=int(year))
+    years = ExamQuestion.objects.values_list('year', flat=True).distinct().order_by('-year')
+    # 渲染题目内容（转换图片作文的文本描述）
+    questions = []
+    for q in qs:
+        questions.append({
+            'id': q.id,
+            'year': q.year,
+            'exam_type': q.get_exam_type_display(),
+            'question_type': q.get_question_type_display(),
+            'genre': q.genre,
+            'title': q.title,
+            'content': q.content,
+            'tags': q.tags,
+            'exam_type_code': q.exam_type,
+            'qtype_code': q.question_type,
+        })
+    return render(request, 'exam_questions.html', {
+        'questions': questions,
+        'years': years,
+        'current_exam_type': exam_type,
+        'current_type': qtype,
+        'current_year': year,
+        'type_options': [
+            ('small_essay', '小作文'),
+            ('big_essay', '大作文'),
+            ('translation', '翻译'),
+        ],
+        'active_nav': 'workshop',
+    })
+
+
+def exam_write_page(request, qid):
+    """写作练习页（作文/翻译共用）"""
+    q = get_object_or_404(ExamQuestion, id=qid)
+    practice = WritingPractice.objects.filter(question=q).select_related('question').first()
+    ctx = {
+        'question': q,
+        'exam_type': q.get_exam_type_display(),
+        'question_type': q.get_question_type_display(),
+        'active_nav': 'workshop',
+    }
+    if practice:
+        ctx['last_practice'] = practice
+        ctx['last_score'] = practice.get_score()
+    return render(request, 'exam_write.html', ctx)
+
+
+def exam_phrases_page(request):
+    """好句/错题本"""
+    phrases = WritingPhrase.objects.select_related('practice__question').order_by('-created_at')[:100]
+    nice = [p for p in phrases if p.phrase_type == 'nice']
+    errors = [p for p in phrases if p.phrase_type == 'error']
+    replaces = [p for p in phrases if p.phrase_type == 'replace']
+    return render(request, 'exam_phrases.html', {
+        'nice': nice, 'errors': errors, 'replaces': replaces,
+        'active_nav': 'workshop',
+    })
+
+
+def exam_history_page(request):
+    """练习历史列表页：展示全部写作/翻译练习记录"""
+    qs = WritingPractice.objects.select_related('question').order_by('-created_at')
+    exam_type = request.GET.get('exam_type', '')
+    qtype = request.GET.get('type', '')
+    source = request.GET.get('source', '')
+    if exam_type:
+        qs = qs.filter(question__exam_type=exam_type)
+    if qtype:
+        qs = qs.filter(question__question_type=qtype)
+    if source:
+        qs = qs.filter(source=source)
+    total = qs.count()
+    practices = qs[:200]
+    # 计算均值
+    scores = []
+    for p in practices:
+        s = p.get_score()
+        if isinstance(s, dict) and s.get('total'):
+            try:
+                scores.append(float(s['total']))
+            except (TypeError, ValueError):
+                pass
+    avg = round(sum(scores) / len(scores), 1) if scores else None
+    return render(request, 'exam_history.html', {
+        'practices': practices,
+        'total': total,
+        'avg': avg,
+        'current_exam_type': exam_type,
+        'current_type': qtype,
+        'current_source': source,
+        'type_options': [
+            ('small_essay', '小作文'),
+            ('big_essay', '大作文'),
+            ('translation', '翻译'),
+        ],
+        'active_nav': 'workshop',
+    })
+
+
+def exam_logs_page(request):
+    """AI 调用日志页"""
+    action = request.GET.get('action', '')
+    qs = AICallLog.objects.select_related('practice__question').order_by('-created_at')
+    if action:
+        qs = qs.filter(action=action)
+    qs = qs[:300]
+    success_count = AICallLog.objects.filter(success=True).count()
+    total_count = AICallLog.objects.count()
+    fail_count = total_count - success_count
+    return render(request, 'exam_logs.html', {
+        'logs': qs,
+        'total_count': total_count,
+        'success_count': success_count,
+        'fail_count': fail_count,
+        'action_options': AICallLog.ACTION_CHOICES,
+        'current_action': action,
+        'active_nav': 'workshop',
+    })
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def api_exam_logs(request):
+    """AI 调用日志 API：GET 列表，可按动作筛选"""
+    qs = AICallLog.objects.select_related('practice__question').order_by('-created_at')
+    action = request.GET.get('action', '')
+    if action:
+        qs = qs.filter(action=action)
+    limit = int(request.GET.get('limit', 50) or 50)
+    logs = qs[:limit]
+    data = []
+    for log in logs:
+        data.append({
+            'id': log.id,
+            'action': log.action,
+            'action_display': log.get_action_display(),
+            'model_id': log.model_id,
+            'success': log.success,
+            'error': log.error,
+            'duration_ms': log.duration_ms,
+            'prompt_preview': log.prompt_preview,
+            'response_preview': log.response_preview,
+            'created_at': log.created_at.strftime('%Y-%m-%d %H:%M:%S') if log.created_at else '',
+            'question': log.practice.question.year if log.practice and log.practice.question else None,
+        })
+    return JsonResponse({'success': True, 'logs': data})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_exam_workshop_data(request):
+    """工坊数据统计 API"""
+    qs = ExamQuestion.objects.all()
+    return JsonResponse({
+        'success': True,
+        'total': qs.count(),
+        'english1': qs.filter(exam_type='english1').count(),
+        'english2': qs.filter(exam_type='english2').count(),
+        'essays': qs.filter(question_type__in=['small_essay', 'big_essay']).count(),
+        'translations': qs.filter(question_type='translation').count(),
+        'practices': WritingPractice.objects.count(),
+        'phrases': WritingPhrase.objects.filter(is_collected=True).count(),
+    })
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_exam_generate_essay(request):
+    """AI 生成作文（根据词汇画像）"""
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+
+    qid = data.get('question_id')
+    style = data.get('style', 'standard')
+    question = get_object_or_404(ExamQuestion, id=qid)
+    profile = build_vocabulary_profile()
+
+    prompt = essay_generation_prompt(question, profile, style)
+    content, err = builtin_ai_exam_call(prompt, temperature=0.8, data=data, action='exam_generate')
+    if err:
+        return JsonResponse({'error': err}, status=502)
+
+    # 保存练习记录
+    practice = WritingPractice.objects.create(
+        question=question,
+        mode='essay',
+        source='ai',
+        ai_output=content.strip(),
+        score_json=json.dumps({'style': style}),
+    )
+    _bind_practice_to_last_log('exam_generate', practice)
+    return JsonResponse({'success': True, 'content': content.strip(), 'practice_id': practice.id})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_exam_grade(request):
+    """AI 批改用户作文"""
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+
+    qid = data.get('question_id')
+    essay = (data.get('essay') or '').strip()
+    if not essay:
+        return JsonResponse({'error': '请先输入作文内容'}, status=400)
+    question = get_object_or_404(ExamQuestion, id=qid)
+
+    prompt = essay_grading_prompt(question, essay)
+    content, err = builtin_ai_exam_call(prompt, temperature=0.3, data=data, action='exam_grade')
+    if err:
+        return JsonResponse({'error': err}, status=502)
+
+    # 解析 JSON
+    score_data = extract_json_object(content)
+    if not score_data:
+        score_data = {'raw': content}
+
+    # 保存练习记录并沉淀好句/错误
+    practice = WritingPractice.objects.create(
+        question=question,
+        mode='essay',
+        source='manual',
+        user_input=essay,
+        ai_output=content,
+        score_json=json.dumps(score_data, ensure_ascii=False),
+        feedback=score_data.get('comments', ''),
+    )
+    _bind_practice_to_last_log('exam_grade', practice)
+
+    # 沉淀错误点
+    for e in (score_data.get('errors') or [])[:5]:
+        if e.get('original') and e.get('corrected'):
+            WritingPhrase.objects.create(
+                practice=practice,
+                phrase=f'{e["original"]} → {e["corrected"]}',
+                meaning=e.get('reason', ''),
+                phrase_type='error',
+            )
+    # 沉淀高级替换
+    for i, e in enumerate((score_data.get('advanced_expressions') or [])[:8]):
+        if e.get('advanced'):
+            WritingPhrase.objects.create(
+                practice=practice,
+                phrase=f'{e.get("advanced", "")}（替换: {e.get("original", "")}）',
+                meaning=e.get('explain', ''),
+                phrase_type='replace',
+            )
+
+    return JsonResponse({'success': True, 'result': score_data, 'practice_id': practice.id})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_exam_translate_analyze(request):
+    """翻译真题句子解析"""
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+
+    qid = data.get('question_id')
+    sentence = (data.get('sentence') or '').strip()
+    if not sentence:
+        return JsonResponse({'error': '请输入要解析的句子'}, status=400)
+    question = get_object_or_404(ExamQuestion, id=qid)
+
+    profile = build_vocabulary_profile()
+    prompt = translation_help_prompt(question, sentence, profile)
+    content, err = builtin_ai_exam_call(prompt, temperature=0.6, data=data, action='exam_translate_analyze')
+    if err:
+        return JsonResponse({'error': err}, status=502)
+    return JsonResponse({'success': True, 'content': content.strip()})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_exam_grade_translation(request):
+    """AI 批改用户译文"""
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+
+    qid = data.get('question_id')
+    user_trans = (data.get('translation') or '').strip()
+    if not user_trans:
+        return JsonResponse({'error': '请先输入你的译文'}, status=400)
+    question = get_object_or_404(ExamQuestion, id=qid)
+
+    prompt = translation_grading_prompt(question, user_trans)
+    content, err = builtin_ai_exam_call(prompt, temperature=0.3, data=data, action='exam_grade_translation')
+    if err:
+        return JsonResponse({'error': err}, status=502)
+
+    score_data = extract_json_object(content)
+    if not score_data:
+        score_data = {'raw': content}
+
+    practice = WritingPractice.objects.create(
+        question=question,
+        mode='translation',
+        source='manual',
+        user_input=user_trans,
+        ai_output=content,
+        score_json=json.dumps(score_data, ensure_ascii=False),
+        feedback=score_data.get('comments', ''),
+    )
+    _bind_practice_to_last_log('exam_grade_translation', practice)
+    return JsonResponse({'success': True, 'result': score_data, 'practice_id': practice.id})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_exam_themes_report(request):
+    """历年真题主题规律分析（AI 报告）"""
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        data = {}
+    qs = ExamQuestion.objects.filter(question_type__in=['small_essay', 'big_essay'])
+    if data.get('exam_type'):
+        qs = qs.filter(exam_type=data['exam_type'])
+    rows = []
+    for q in qs.order_by('-year')[:60]:
+        rows.append(f'{q.year}年 {q.get_exam_type_display()} {q.get_question_type_display()}'
+                    f'{(" - " + q.genre) if q.genre else ""}: {q.content}')
+    if not rows:
+        return JsonResponse({'error': '暂无真题数据'}, status=400)
+    prompt = themes_report_prompt('\n'.join(rows))
+    content, err = builtin_ai_exam_call(prompt, temperature=0.5, data=data, action='exam_themes_report')
+    if err:
+        return JsonResponse({'error': err}, status=502)
+    return JsonResponse({'success': True, 'content': content.strip()})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_exam_phrase_toggle(request):
+    """好句收藏/取消"""
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+    pid = data.get('phrase_id')
+    try:
+        phrase = WritingPhrase.objects.get(id=int(pid))
+    except (WritingPhrase.DoesNotExist, TypeError, ValueError):
+        return JsonResponse({'error': '句子不存在'}, status=404)
+    phrase.is_collected = not phrase.is_collected
+    phrase.save()
+    return JsonResponse({'success': True, 'is_collected': phrase.is_collected})
+
+
+def extract_json_object(text):
+    """从 AI 输出中提取 JSON 对象（兼容 ```json 代码块包裹）"""
+    if not text:
+        return {}
+    text = text.strip()
+    # 去掉 ```json ... ``` 代码块
+    m = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+    if m:
+        text = m.group(1).strip()
+    # 提取最外层大括号
+    start = text.find('{')
+    if start == -1:
+        return {}
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == '{':
+            depth += 1
+        elif text[i] == '}':
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start:i + 1])
+                except json.JSONDecodeError:
+                    return {}
+    return {}
