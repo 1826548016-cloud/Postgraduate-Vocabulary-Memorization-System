@@ -433,6 +433,26 @@ def history(request):
     if action in dict(StudyRecord.ACTION_CHOICES):
         qs = qs.filter(action=action)
 
+    # 自定义时间范围筛选（不动数据库 schema，仅过滤 created_at 日期）
+    start_date = request.GET.get('start_date', '').strip()
+    end_date = request.GET.get('end_date', '').strip()
+    date_from = None
+    date_to = None
+    try:
+        if start_date:
+            date_from = datetime.strptime(start_date, '%Y-%m-%d').date()
+            qs = qs.filter(created_at__date__gte=date_from)
+    except ValueError:
+        date_from = None
+        start_date = ''
+    try:
+        if end_date:
+            date_to = datetime.strptime(end_date, '%Y-%m-%d').date()
+            qs = qs.filter(created_at__date__lte=date_to)
+    except ValueError:
+        date_to = None
+        end_date = ''
+
     ok_actions = ('known', 'spelling_ok', 'meaning_ok')
 
     # 累计与今日统计
@@ -485,6 +505,8 @@ def history(request):
         'source': source,
         'action': action,
         'days': days,
+        'start_date': start_date,
+        'end_date': end_date,
         'total': total,
         'today_total': today_total,
         'correct_rate': correct_rate,

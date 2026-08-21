@@ -92,6 +92,10 @@
         <option value="30" {% if days == '30' %}selected{% endif %}>近 30 天趋势</option>
         <option value="90" {% if days == '90' %}selected{% endif %}>近 90 天趋势</option>
       </select>
+      <span class="text-secondary text-sm" style="margin-left: 4px;">时间范围：</span>
+      <input type="date" name="start_date" value="{{ start_date }}" class="form-input" style="width: auto;" max="{{ end_date }}">
+      <span class="text-secondary">~</span>
+      <input type="date" name="end_date" value="{{ end_date }}" class="form-input" style="width: auto;" min="{{ start_date }}">
       <button type="submit" class="btn btn-primary"><i class="ph ph-funnel"></i> 筛选</button>
       <a href="{% url 'words:history' %}" class="btn btn-secondary">重置</a>
     </form>
@@ -148,11 +152,11 @@
     <!-- 分页 -->
     <div class="pagination">
       {% if page_obj.has_previous %}
-      <a class="page-link" href="?page={{ page_obj.previous_page_number }}&source={{ source }}&action={{ action }}&days={{ days }}">上一页</a>
+      <a class="page-link" href="?page={{ page_obj.previous_page_number }}&source={{ source }}&action={{ action }}&days={{ days }}&start_date={{ start_date }}&end_date={{ end_date }}">上一页</a>
       {% endif %}
       <span class="page-link active">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
       {% if page_obj.has_next %}
-      <a class="page-link" href="?page={{ page_obj.next_page_number }}&source={{ source }}&action={{ action }}&days={{ days }}">下一页</a>
+      <a class="page-link" href="?page={{ page_obj.next_page_number }}&source={{ source }}&action={{ action }}&days={{ days }}&start_date={{ start_date }}&end_date={{ end_date }}">下一页</a>
       {% endif %}
     </div>
   {% else %}

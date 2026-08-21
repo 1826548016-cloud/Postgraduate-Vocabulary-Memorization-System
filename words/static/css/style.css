@@ -997,6 +997,19 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 .phrase-list { list-style: none; padding: 0; margin: 0; }
 .phrase-item { padding: 10px 12px; border: 1px solid var(--c-border-light); border-radius: var(--radius-sm); margin-bottom: 8px; background: var(--c-bg); }
 .phrase-text { font-weight: 500; line-height: 1.5; word-break: break-word; }
+.phrase-collect-btn { background: transparent; border: none; cursor: pointer; padding: 2px 6px; border-radius: var(--radius-sm); display: inline-flex; align-items: center; gap: 3px; transition: background .15s ease; }
+.phrase-collect-btn:hover { background: var(--c-surface-2); }
+.phrase-collect-btn:disabled { cursor: not-allowed; opacity: .7; }
+
+.quote-bar { overflow: hidden; background: var(--c-surface); border: 1px solid var(--c-border-light); border-radius: var(--radius-md); padding: 12px 0; position: relative; }
+.quote-bar::before, .quote-bar::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40px; z-index: 1; pointer-events: none; }
+.quote-bar::before { left: 0; background: linear-gradient(to right, var(--c-surface), transparent); }
+.quote-bar::after { right: 0; background: linear-gradient(to left, var(--c-surface), transparent); }
+.quote-track { display: inline-flex; white-space: nowrap; animation: quote-scroll 40s linear infinite; }
+.quote-track:hover { animation-play-state: paused; }
+.quote-item { display: inline-flex; align-items: center; gap: 6px; padding: 0 36px; font-size: var(--fs-sm); color: var(--c-text-2); }
+.quote-item i.ph { color: var(--c-red); }
+@keyframes quote-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
