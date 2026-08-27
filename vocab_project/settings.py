@@ -2,9 +2,31 @@
 Django settings for vocab_project project.
 """
 
+import os
+import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# ===== 运行模式检测 =====
+# PyInstaller 打包后：sys.frozen=True，sys._MEIPASS 指向解压的只读资源目录
+# 开发模式：BASE_DIR 是项目根目录
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    FROZEN = True
+    BASE_DIR = Path(sys._MEIPASS)
+    # 可写数据目录：exe 同目录的 ./data/（避免 _MEIPASS 临时目录被清空）
+    DATA_DIR = Path(sys.executable).resolve().parent / 'data'
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / 'media').mkdir(exist_ok=True)
+    (DATA_DIR / 'backups').mkdir(exist_ok=True)
+    _local_ffmpeg = Path(sys.executable).resolve().parent / 'ffmpeg.exe'
+    _local_ffprobe = Path(sys.executable).resolve().parent / 'ffprobe.exe'
+    FFMPEG_PATH = str(_local_ffmpeg) if _local_ffmpeg.exists() else 'ffmpeg'
+    FFPROBE_PATH = str(_local_ffprobe) if _local_ffprobe.exists() else 'ffprobe'
+else:
+    FROZEN = False
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    DATA_DIR = BASE_DIR
+    FFMPEG_PATH = 'd:\\trae\\Trae CN\\resources\\app\\bin\\ffmpeg.exe'
+    FFPROBE_PATH = 'd:\\trae\\Trae CN\\resources\\app\\bin\\ffprobe.exe'
 
 SECRET_KEY = 'django-insecure-%3#v_5wpj1rord)qcqs*s0v0@hfb-y#8=q6k=(oy7ho=4vdxk'
 
@@ -53,7 +75,7 @@ WSGI_APPLICATION = 'vocab_project.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': DATA_DIR / 'db.sqlite3',
     }
 }
 
@@ -73,12 +95,8 @@ STATICFILES_DIRS = [
 ]
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = DATA_DIR / 'media'
 
-# ffmpeg 路径：用于从视频提取音轨（音乐播放器）
-FFMPEG_PATH = 'd:\\trae\\Trae CN\\resources\\app\\bin\\ffmpeg.exe'
-FFPROBE_PATH = 'd:\\trae\\Trae CN\\resources\\app\\bin\\ffprobe.exe'
-
-BACKUP_DIR = BASE_DIR / 'backups'
+BACKUP_DIR = DATA_DIR / 'backups'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

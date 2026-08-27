@@ -150,6 +150,63 @@ def translation_grading_prompt(question, user_translation, reference=None):
 {user_translation}"""
 
 
+def cet6_translation_help_prompt(question, paragraph, user_level_desc):
+    """六级段落翻译（汉译英）解析提示词：分析中文段落，给出词汇、句式与参考译文"""
+    return f"""你是一位大学英语六级翻译辅导老师。请帮助用户将以下中文段落翻译成英文。
+
+【用户的词汇水平画像】
+{user_level_desc}
+
+【中文段落】
+{paragraph}
+
+请从以下四个层面帮助用户（用中文回答，Markdown 格式）：
+## 1. 关键词与表达
+列出段落中相对难翻译或值得记的中文词组/短语，给出对应的英文译法（优先使用落在用户当前词汇量内的词），并标注是否超纲。
+
+## 2. 句式拆解与建议
+按意群把中文段落拆成 4-6 个小句，逐句说明：
+- 中文原句
+- 推荐的英文句式（主谓宾 / 倒装 / 强调句 / 从句 / 分词作状语等）
+- 翻译时需注意的语序调整、时态、单复数、冠词等
+
+## 3. 参考译文
+给出一份通顺、贴合用户词汇水平的完整英文参考译文（约 150-200 词）。
+
+## 4. 翻译技巧点拨
+总结汉译英这类段落翻译的 2-3 条通用技巧（如：化整为零拆短句、被动转主动、并列句合并、删冗余修饰等）。
+
+【真题背景】
+大学英语六级 {question.year}年段落翻译真题
+{question.title}"""
+
+
+def cet6_translation_grading_prompt(question, user_translation, reference=None):
+    """批改用户英文译文（汉译英），结构化 JSON 输出"""
+    ref_part = f'\n【参考译文】\n{reference}' if reference else ''
+    return f"""你是一位大学英语六级翻译阅卷老师。请对用户的英文译文进行批改，并以严格的 JSON 对象格式输出（不要输出任何其他文字）。
+
+【批改维度】（每项 0-10 分）
+1. accuracy：忠实度（是否准确传达原文意思，有无漏译、误译）
+2. grammar：语法（时态、单复数、冠词、从句结构是否正确）
+3. vocabulary：用词（词汇是否恰当、是否回避了重复、有无中式英语）
+4. fluency：通顺度（英文表达是否自然、地道）
+5. coherence：连贯度（句间衔接、上下文逻辑是否清晰）
+
+【输出格式】
+{{
+  "scores": {{"accuracy": 8, "grammar": 7, "vocabulary": 8, "fluency": 7, "coherence": 8}},
+  "total": 38,
+  "comments": "总评：一段话整体点评（中文）",
+  "errors": [{{"original": "用户译句", "corrected": "改进后", "reason": "原因（中文）"}}],
+  "suggestions": ["改进建议1（中文）", "改进建议2", "改进建议3"],
+  "model_translation": "更佳的参考英文译文"
+}}
+{ref_part}
+【用户译文】
+{user_translation}"""
+
+
 def themes_report_prompt(questions_text):
     """历年真题主题规律分析提示词"""
     return f"""你是一位研究考研英语命题规律多年的专家。以下是部分历年真题，请分析：

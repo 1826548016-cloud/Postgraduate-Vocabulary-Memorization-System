@@ -277,15 +277,83 @@
 </div>
 
 <!-- About -->
-<div class="card">
-  <div class="card-header">关于</div>
-  <div class="text-secondary">
-    <p>考研单词背诵系统 v2.0.0</p>
-    <p>一个高效的考研单词背诵平台（词源来源于网络）</p>
-    <p>技术栈：Django + Chart.js + Browser TTS</p>
-    <p>最后更新于：2026年8月10日</p>
-    <p>声明：仅用于学习和研究，不涉及任何商业用途。</p>
-    <p>如果token不够的话可以访问https://www.codex2api.com/register?aff=VBXRX8FRRMCR进行购买调用</p>
+<div class="card" style="padding: 0; overflow: hidden;">
+  <div class="card-header" style="display:flex; align-items:center; gap:10px; padding: 16px 22px; margin:0; border-bottom:1px solid var(--c-border-light); background: var(--c-surface-2);">
+    <i class="ph ph-info" style="color: var(--c-blue); font-size:1.3rem;"></i> 关于
+  </div>
+  <div style="padding: 18px 22px;">
+
+    <!-- 关键信息三卡片 -->
+    <div class="card-grid mb-4" style="grid-template-columns: repeat(3, 1fr); gap: 12px;">
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-icon stat-icon--red"><i class="ph ph-tag"></i></span>
+          <span class="card-header" style="margin:0; font-size: 0.85rem;">版本</span>
+        </div>
+        <div class="stat-value">v3.1.1</div>
+        <div class="stat-label">考研单词背诵系统</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-icon stat-icon--blue"><i class="ph ph-stack"></i></span>
+          <span class="card-header" style="margin:0; font-size: 0.85rem;">技术栈</span>
+        </div>
+        <div class="stat-value" style="font-size: 1rem;">Django · Chart.js</div>
+        <div class="stat-label">Browser TTS</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-icon stat-icon--green"><i class="ph ph-calendar-check"></i></span>
+          <span class="card-header" style="margin:0; font-size: 0.85rem;">最后更新</span>
+        </div>
+        <div class="stat-value">2026-08-27</div>
+        <div class="stat-label">最近一次发布</div>
+      </div>
+    </div>
+
+    <!-- 简介 -->
+    <div class="text-secondary" style="margin-bottom: 14px; line-height: 1.7;">
+      一个高效的考研单词背诵平台，词源来源于网络。
+    </div>
+
+    <!-- 联系作者 -->
+    <div style="padding: 12px 14px; background: var(--c-surface-2); border-left: 3px solid var(--c-blue); border-radius: 6px; margin-bottom: 14px;">
+      <div style="display:flex; align-items:flex-start; gap:8px;">
+        <i class="ph ph-user-circle" style="color: var(--c-blue); margin-top: 2px;"></i>
+        <div style="flex:1;">
+          <div style="font-weight:500; margin-bottom: 6px;">联系作者</div>
+          <div style="display:flex; gap: 18px; flex-wrap: wrap; align-items:center;">
+            <a href="mailto:qzx1028918@163.com" style="display:inline-flex; align-items:center; gap:6px; color: var(--c-blue); text-decoration: none;">
+              <i class="ph ph-envelope-simple"></i> qzx1028918@163.com
+            </a>
+            <a href="http://wpa.qq.com/msgrd?v=3&uin=3491686496&site=qq&menu=yes" target="_blank" rel="noopener" style="display:inline-flex; align-items:center; gap:6px; color: var(--c-blue); text-decoration: none;">
+              <i class="ph ph-chat-circle"></i> QQ：3491686496
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 声明 -->
+    <div style="padding: 12px 14px; background: var(--c-surface-2); border-left: 3px solid var(--c-amber); border-radius: 6px; margin-bottom: 14px;">
+      <div style="display:flex; align-items:flex-start; gap:8px;">
+        <i class="ph ph-warning-circle" style="color: var(--c-amber); margin-top: 2px;"></i>
+        <div>
+          <div style="font-weight:500; margin-bottom: 4px;">使用声明</div>
+          <div class="text-secondary text-sm">仅用于学习和研究，不涉及任何商业用途。</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Token 购买入口 -->
+    <div style="display:flex; align-items:center; gap:10px; padding: 12px 14px; background: var(--c-surface-2); border-radius: 6px; flex-wrap: wrap;">
+      <i class="ph ph-lightning" style="color: var(--c-amber);"></i>
+      <span class="text-secondary text-sm">如果 Token 不够用：</span>
+      <a href="https://www.codex2api.com/register?aff=VBXRX8FRRMCR" target="_blank" rel="noopener" class="btn btn-secondary btn-xs">
+        <i class="ph ph-arrow-square-out"></i> 访问 codex2api 购买调用
+      </a>
+    </div>
+
   </div>
 </div>
 

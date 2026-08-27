@@ -35,7 +35,7 @@ from .ai_prompts import (
 from .ai_exam_prompts import (
     build_vocabulary_profile, essay_generation_prompt, essay_grading_prompt,
     translation_help_prompt, translation_grading_prompt, themes_report_prompt,
-    personal_template_prompt,
+    personal_template_prompt, cet6_translation_help_prompt, cet6_translation_grading_prompt,
 )
 
 
@@ -4433,6 +4433,11 @@ def exam_workshop(request):
                 'icon': 'ph-translate', 'tone': 'green',
                 'title': '英语二翻译', 'desc': '段落翻译',
             },
+            {
+                'url': '/workshop/questions/?exam_type=cet6&type=translation',
+                'icon': 'ph-text-a-underline', 'tone': 'amber',
+                'title': '六级翻译', 'desc': '汉译英段落翻译',
+            },
         ],
     })
 
@@ -4443,7 +4448,7 @@ def exam_questions_page(request):
     qtype = request.GET.get('type', '')
     year = request.GET.get('year', '')
     qs = ExamQuestion.objects.all()
-    if exam_type in ('english1', 'english2'):
+    if exam_type in ('english1', 'english2', 'cet6'):
         qs = qs.filter(exam_type=exam_type)
     if qtype in ('small_essay', 'big_essay', 'translation'):
         qs = qs.filter(question_type=qtype)
@@ -4761,6 +4766,77 @@ def api_exam_grade_translation(request):
         feedback=score_data.get('comments', ''),
     )
     _bind_practice_to_last_log('exam_grade_translation', practice)
+    return JsonResponse({'success': True, 'result': score_data, 'practice_id': practice.id})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_cet6_translate_analyze(request):
+    """六级段落翻译（汉译英）解析：分析中文段落，给出词汇、句式、参考译文"""
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+
+    qid = data.get('question_id')
+    paragraph = (data.get('paragraph') or '').strip()
+    if not paragraph:
+        return JsonResponse({'error': '请输入要翻译的中文段落'}, status=400)
+    question = get_object_or_404(ExamQuestion, id=qid)
+
+    profile = build_vocabulary_profile()
+    prompt = cet6_translation_help_prompt(question, paragraph, profile)
+    content, err = builtin_ai_exam_call(prompt, temperature=0.6, data=data, action='cet6_translate_analyze')
+    if err:
+        return JsonResponse({'error': err}, status=502)
+    return JsonResponse({'success': True, 'content': content.strip()})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_cet6_grade_translation(request):
+    """六级段落翻译（汉译英）AI 批改：批改用户英文译文"""
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': '请求格式错误'}, status=400)
+
+    qid = data.get('question_id')
+    user_trans = (data.get('translation') or '').strip()
+    if not user_trans:
+        return JsonResponse({'error': '请先输入你的英文译文'}, status=400)
+    question = get_object_or_404(ExamQuestion, id=qid)
+
+    reference = (question.model_answer or '').strip() or None
+    prompt = cet6_translation_grading_prompt(question, user_trans, reference=reference)
+    content, err = builtin_ai_exam_call(prompt, temperature=0.3, data=data, action='cet6_grade_translation')
+    if err:
+        return JsonResponse({'error': err}, status=502)
+
+    score_data = extract_json_object(content)
+    if not score_data:
+        score_data = {'raw': content}
+
+    practice = WritingPractice.objects.create(
+        question=question,
+        mode='translation',
+        source='manual',
+        user_input=user_trans,
+        ai_output=content,
+        score_json=json.dumps(score_data, ensure_ascii=False),
+        feedback=score_data.get('comments', ''),
+    )
+    _bind_practice_to_last_log('cet6_grade_translation', practice)
+
+    for e in (score_data.get('errors') or [])[:5]:
+        if e.get('original') and e.get('corrected'):
+            WritingPhrase.objects.create(
+                practice=practice,
+                phrase=f'{e["original"]} → {e["corrected"]}',
+                meaning=e.get('reason', ''),
+                phrase_type='error',
+            )
+
     return JsonResponse({'success': True, 'result': score_data, 'practice_id': practice.id})
 
 

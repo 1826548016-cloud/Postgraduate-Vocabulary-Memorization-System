@@ -598,6 +598,7 @@ class ExamQuestion(models.Model):
     EXAM_TYPE_CHOICES = [
         ('english1', '英语一'),
         ('english2', '英语二'),
+        ('cet6', '六级'),
     ]
     QUESTION_TYPE_CHOICES = [
         ('small_essay', '小作文'),
@@ -621,7 +622,7 @@ class ExamQuestion(models.Model):
 
     class Meta:
         ordering = ['exam_type', '-year', 'question_type']
-        unique_together = [('exam_type', 'year', 'question_type')]
+        unique_together = [('exam_type', 'year', 'question_type', 'genre')]
         verbose_name = '考研真题'
         verbose_name_plural = '考研真题'
 
@@ -697,6 +698,8 @@ class AICallLog(models.Model):
         ('exam_translate_analyze', '翻译拆解'),
         ('exam_themes_report', '命题规律分析'),
         ('exam_template', '专属模板'),
+        ('cet6_translate_analyze', '六级翻译解析'),
+        ('cet6_grade_translation', '六级译文批改'),
     ]
     user = models.ForeignKey('auth.User', null=True, blank=True,
         on_delete=models.SET_NULL, verbose_name='用户')

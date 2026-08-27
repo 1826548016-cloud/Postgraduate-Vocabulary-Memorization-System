@@ -27,8 +27,141 @@
   {% endif %}
 </div>
 
-{% if question.question_type == 'translation' %}
-<!-- ===== 翻译练习模式 ===== -->
+{% if question.exam_type == 'cet6' and question.question_type == 'translation' %}
+<!-- ===== 六级翻译练习模式（汉译英） ===== -->
+<div style="display:flex; gap:16px; flex-wrap: wrap;">
+  <div style="flex:1 1 340px; min-width: 280px;">
+    <div class="card mb-4">
+      <div class="card-header">中文原文</div>
+      <div class="word-text" style="white-space: pre-line; line-height:1.8; font-size:1.05rem;">{{ question.content }}</div>
+      <div class="flex gap-2 mt-2" style="flex-wrap: wrap;">
+        <button type="button" class="btn btn-primary btn-sm" onclick="analyzeCet6Paragraph()"><i class="ph ph-magnifying-glass"></i> AI 解析段落</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header flex justify-between items-center">
+        <span>我的英文译文</span>
+        <span class="text-secondary text-sm" id="cet6WordCount">0 词</span>
+      </div>
+      <textarea id="myCet6Translation" class="form-input" rows="8" placeholder="在此输入你的英文译文…（建议 150-200 词）"></textarea>
+      <div class="flex justify-between items-center mt-2">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="copyText(document.getElementById('myCet6Translation').value)">复制</button>
+        <button type="button" class="btn btn-primary" onclick="gradeCet6Translation()"><i class="ph ph-check-square"></i> AI 批改译文</button>
+      </div>
+    </div>
+  </div>
+  <div style="flex:1.3 1 420px; min-width: 300px;">
+    <div class="card mb-4">
+      <div class="card-header flex justify-between items-center">
+        <span>AI 解析</span>
+        <i class="ph ph-sparkle text-accent"></i>
+      </div>
+      <div id="cet6AnalyzeResult" class="markdown-body text-secondary" style="min-height:80px;">
+        <div class="empty-state"><div class="empty-state-title">等待解析</div><div>点击「AI 解析段落」，将得到关键词与表达、句式拆解、参考译文与翻译技巧</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header flex justify-between items-center">
+        <span>批改结果</span>
+        <i class="ph ph-sparkle text-accent"></i>
+      </div>
+      <div id="cet6GradeResult" style="min-height:60px;">
+        <div class="empty-state"><div class="empty-state-title">还没有批改</div><div>写完英文译文后点击「AI 批改译文」</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{{ question.content|json_script:"cet6-paragraph-data" }}
+<script>
+function analyzeCet6Paragraph() {
+  var paragraph = JSON.parse(document.getElementById('cet6-paragraph-data').textContent);
+  if (!paragraph || !paragraph.trim()) {
+    showToast('该真题尚未录入中文段落原文', 'error');
+    return;
+  }
+  var box = document.getElementById('cet6AnalyzeResult');
+  box.innerHTML = '<div class="report-loading">AI 解析中，请稍候…</div>';
+  VOCAB_API.post('{% url "words:api_cet6_translate_analyze" %}', { question_id: {{ question.id }}, paragraph: paragraph }).then(function (res) {
+    if (res.success) {
+      box.innerHTML = renderMarkdown(res.content);
+      showToast('解析完成', 'success');
+    } else {
+      box.innerHTML = '<div class="empty-state">' + (res.error || '解析失败') + '</div>';
+      showToast(res.error || '解析失败', 'error');
+    }
+  }).catch(function () {
+    box.innerHTML = '<div class="empty-state">请求失败，请检查网络或 AI 配置</div>';
+    showToast('请求失败', 'error');
+  });
+}
+
+function gradeCet6Translation() {
+  var trans = document.getElementById('myCet6Translation').value.trim();
+  if (!trans) { showToast('请先输入你的英文译文', 'error'); return; }
+  var box = document.getElementById('cet6GradeResult');
+  box.innerHTML = '<div class="report-loading">AI 批改中，请稍候…</div>';
+  VOCAB_API.post('{% url "words:api_cet6_grade_translation" %}', { question_id: {{ question.id }}, translation: trans }).then(function (res) {
+    if (res.success) {
+      box.innerHTML = renderCet6GradeResult(res.result);
+      showToast('批改完成', 'success');
+    } else {
+      box.innerHTML = '<div class="empty-state">' + (res.error || '批改失败') + '</div>';
+      showToast(res.error || '批改失败', 'error');
+    }
+  }).catch(function () {
+    box.innerHTML = '<div class="empty-state">请求失败，请检查网络或 AI 配置</div>';
+    showToast('请求失败', 'error');
+  });
+}
+
+function renderCet6GradeResult(r) {
+  if (!r || r.raw) return '<div class="markdown-body">' + renderMarkdown(r.raw || '—') + '</div>';
+  var html = '';
+  var scores = r.scores || {};
+  var dims = [
+    ['accuracy', '忠实度'], ['grammar', '语法'], ['vocabulary', '用词'],
+    ['fluency', '通顺度'], ['coherence', '连贯']
+  ];
+  html += '<div class="grid-3" style="margin-bottom: 12px;">';
+  dims.forEach(function (d) {
+    var v = scores[d[0]] || 0;
+    html += '<div class="card" style="padding:10px; text-align:center;">'
+      + '<div class="stat-value text-accent">' + v + '</div>'
+      + '<div class="text-secondary text-sm">' + d[1] + '</div></div>';
+  });
+  html += '</div>';
+  if (r.total) html += '<div class="mb-2"><strong>总分：' + r.total + ' / 50</strong></div>';
+  if (r.comments) html += '<div class="mb-2">' + renderMarkdown('**总评：**' + r.comments) + '</div>';
+  if (r.errors && r.errors.length) {
+    html += '<div class="mb-2"><strong>错误修正：</strong></div><ul class="mb-2 error-list">';
+    r.errors.forEach(function (e) {
+      html += '<li style="margin-bottom:6px;"><span style="text-decoration:line-through;">' + escapeHtml(e.original || '') + '</span> → '
+        + '<span class="text-accent">' + escapeHtml(e.corrected || '') + '</span>'
+        + (e.reason ? ' <span class="text-secondary text-sm">(' + escapeHtml(e.reason) + ')</span>' : '') + '</li>';
+    });
+    html += '</ul>';
+  }
+  if (r.suggestions && r.suggestions.length) {
+    html += '<div class="mb-2"><strong>改进建议：</strong></div><ul class="mb-2">';
+    r.suggestions.forEach(function (s) { html += '<li>' + escapeHtml(s) + '</li>'; });
+    html += '</ul>';
+  }
+  if (r.model_translation) {
+    html += '<div class="mb-2"><strong>参考译文：</strong></div><div class="model-box" style="white-space: pre-wrap;">' + escapeHtml(r.model_translation) + '</div>';
+  }
+  return html;
+}
+
+document.getElementById('myCet6Translation').addEventListener('input', function () {
+  var t = this.value.trim();
+  var words = t ? t.split(/\s+/).filter(Boolean).length : 0;
+  document.getElementById('cet6WordCount').textContent = words + ' 词';
+});
+</script>
+
+{% elif question.question_type == 'translation' %}
+<!-- ===== 考研翻译练习模式（英译汉） ===== -->
 <div style="display:flex; gap:16px; flex-wrap: wrap;">
   <div style="flex:1 1 340px; min-width: 280px;">
     <div class="card mb-4">
